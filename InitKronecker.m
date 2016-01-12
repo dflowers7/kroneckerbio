@@ -20,4 +20,12 @@ for i = 1:numel(compatibility_files)
     end
 end
 
+% SUNDIALS, if it exists
+sundialsFile = fullfile('External','sundialsTB','startup_STB.m');
+if exist(sundialsFile, 'file') > 0
+    run(sundialsFile)
+else
+    fprintf('sundialsTB has not been installed. Install sundialsTB in the External folder, then run this function again.\n')
+end
+
 disp('KroneckerBio v0.5.0');
