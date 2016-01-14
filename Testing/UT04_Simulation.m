@@ -41,11 +41,13 @@ end
 function testSimulateSelectSimple(a)
 [m, con, ~, opts] = simple_model();
 
-tget = 0:0.1:4;
+tget = 0:0.15:4.05; % Want to test when t_get and discontinuities don't always align
 obs = observationSelect(tget);
 
 opts.Integrator = 'sundials';
+tic;
 sim_sundials = SimulateSystem(m, con, obs, opts);
+toc
 
 nt = length(tget);
 a.verifyEqual(size(sim_sundials.x), [m.nx,nt])
@@ -53,7 +55,9 @@ a.verifyEqual(size(sim_sundials.u), [m.nu,nt])
 a.verifyEqual(size(sim_sundials.y), [m.ny,nt])
 
 opts.Integrator = 'ode15s';
+tic;
 sim_ode15s = SimulateSystem(m, con, obs, opts);
+toc
 
 a.verifyEqual(size(sim_ode15s.x), [m.nx,nt])
 a.verifyEqual(size(sim_ode15s.u), [m.nu,nt])

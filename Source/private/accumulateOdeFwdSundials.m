@@ -43,7 +43,7 @@ NumRoots = length(events(0, ic));
 % discontinuities will be a column vector sorted ascending. These are
 % discontinuities in the output, not in the RHS.
 discontinuities = unique([vec(discontinuities); t0; tF]);
-N = numel(discontinuities);
+N = numel(t_get);
 
 % Set integration options
 options = CVodeSetOptions(...
@@ -55,9 +55,9 @@ options = CVodeSetOptions(...
     'NumRoots', NumRoots...
     );
 
-% Determine stopping times, which are a combination of t_get and the
-% discontinuities
-t_stop = unique([vec(discontinuities); vec(t_get)]);
+% Determine stopping times, which are the discontinuities
+%t_stop = unique([vec(discontinuities); vec(t_get)]);
+t_stop = discontinuities;
 
 % Initialize solution vectors t and x
 sol.t = zeros(1,N);
@@ -72,31 +72,45 @@ nevents = 0; % number of events that have occurred
 
 done = false;
 ii = 1;
-ti = t0;
-xi = ic + delta(t0, ic); % add in any delta at the first timepoint
+tstop_i = t0;
+x_stop = ic + delta(t0, ic); % add in any delta at the first timepoint
+isDiscontinuity = true;
 
 sol.t(1) = t0;
-sol.x(:,1) = xi;
+sol.x(:,1) = x_stop;
 
-% Iterate over the stopping times, integrating to each one from the last
+% Iterate over the discontinuities, integrating to each one from the last
 while ~done
     
     ii = ii + 1;
     
-    tstopi = t_stop(ii);
+    tstart_i = tstop_i;
+    tstop_i = t_stop(find(t_stop > tstart_i, 1, 'first'));
     
-    % Initialize solver
-    options = CVodeSetOptions(options, 'StopTime', tstopi);
+    % Initialize options and solver
     if ii == 2 % First initialization
-        CVodeInit(der, 'BDF', 'Newton', ti, xi, options);
-    else
+        %options = CVodeSetOptions(options, 'StopTime', tstopi);
+        CVodeInit(der, 'BDF', 'Newton', tstart_i, x_stop, options);
+    elseif isDiscontinuity
         % Reinitialization updates the states with their post-discontinuity
-        % values
-        CVodeReInit(ti, xi, options);
+        % values and moves the final time to the next discontinuity
+        %options = CVodeSetOptions(options, 'StopTime', tstopi);
+        CVodeReInit(tstart_i, x_stop, options);
     end
     
-    % Integrate to first discontinuity or event
-    [status, ti, xi] = CVode(tstopi, 'Normal');
+    % Determine which t_get are in this interval of time
+    tget_is_i = t_get > tstart_i & t_get <= tstop_i;
+    
+    % Set up list of time points to record during this interval of time
+    % (includes t_get points determined above and next discontinuity)
+    trecord_i = unique([vec(t_get(tget_is_i)); tstop_i]);
+    trecord_is_tget = ismember(trecord_i, t_get(tget_is_i));
+    trecord_is_tstop = trecord_i == tstop_i;
+    
+    % Integrate to next discontinuity or event
+    [status, t_i, x_i] = CVode(trecord_i, 'Normal');
+    
+    isDiscontinuity = false;
     
     % Determine why integration stopped and handle accordingly
     switch status
@@ -104,15 +118,20 @@ while ~done
             CVodeFree;
             error('KroneckerBio:accumulateOde:IntegrationFailure', 'Did not integrate through entire interval!');
         case 2 % event(s)
-            % Determine which events occurred
+            
+            % Get time and states of the last time step
             stats = CVodeGetStats;
+            tcur = stats.tcur;
+            xcur = CVodeGet('DerivSolution', tcur, 0);
+    
+            % Determine which events occurred
             eventOccurred = stats.RootInfo.roots; % eventOccurred is a vector with 1's at positions of events that triggered
             
-            % Check directions (currently not implemented. Does anyone use this?)
+            % Check directions (currently not implemented. Does anyone/anything use this?)
             
             % Record each event
-            for ie_i = find(eventOccurred(:).' == 1)
-                if is_finished(sol) && isTerminal(ti, xi)
+            for ie_cur = find(eventOccurred(:).' == 1)
+                if is_finished(sol) && isTerminal(tcur, xcur)
                     done = true;
                 end
                 nevents = nevents + 1;
@@ -124,23 +143,30 @@ while ~done
                     sol.xe = [sol.xe zeros(nx, eventArraySize)];
                     eventArraySize = 2*eventArraySize;
                 end
-                sol.ie(nevents) = ie_i;
-                sol.te(nevents) = ti;
-                sol.xe(:,nevents) = xi;
+                sol.ie(nevents) = ie_cur;
+                sol.te(nevents) = tcur;
+                sol.xe(:,nevents) = xcur;
             end
-        otherwise % discontinuity and/or requested time
-            if ismember(ti, discontinuities) % Discontinuity
-                % Apply delta
-                if ~isempty(delta)
-                    xi = xi + delta(tstopi, xi);
-                end
+        otherwise % discontinuity
+            %if ismember(ti, discontinuities) % Discontinuity
+            
+            % Apply delta
+            if ~isempty(delta)
+                x_i(:,trecord_is_tstop) = x_i(:,trecord_is_tstop) + delta(tstop_i, x_stop);
             end
-            if ismember(ti, t_get) % Requested time
-                % Record time and states
-                sol.t(ii) = ti;
-                sol.x(:,ii) = xi;
-            end
-            if ti == tF % Check if reached tF
+            x_stop = x_i(:,trecord_is_tstop);
+            
+            x_get = x_i(:,trecord_is_tget);
+            sol.t(tget_is_i) = t_i(trecord_is_tget);
+            sol.x(:,tget_is_i) = x_get;
+            isDiscontinuity = true;
+            %end
+%             if ismember(ti, t_get) % Requested time
+%                 % Record time and states
+%                 sol.t(ii) = ti;
+%                 sol.x(:,ii) = xi;
+%             end
+            if t_i(trecord_is_tstop) == tF % Check if reached tF
                 done = true;
             end
     end
