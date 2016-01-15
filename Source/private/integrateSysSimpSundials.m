@@ -2,6 +2,8 @@ function int = integrateSysSimpSundials(m, con, tF, eve, fin, t_get, opts)
 
 % Constants
 nx = m.nx;
+nT = 0;
+ng = 0;
 
 y = m.y;
 u = con.u;
@@ -20,8 +22,15 @@ else
     ic = steadystateSys(m, con, opts);
 end
 
+x0_ = ic(1:nx);
+
+% Initialize integrator
+t0 = 0;
+sundials_options = initializeStateOdesSundials(der, jac, t0, x0_, RelTol, AbsTol, del, eve);
+
 % Integrate f over time
-sol = accumulateOdeFwdSundials(der, jac, 0, tF, ic, discontinuities, t_get, RelTol, AbsTol(1:nx), del, eve, fin, nx);
+freeMemoryOnFinish = true;
+sol = accumulateOdeFwdSundials(sundials_options, tF, t_get, discontinuities, x0_, [], [], nx, [], [], del, [], eve, fin, freeMemoryOnFinish);
 
 % Work down
 int.Type = 'Integration.System.Simple';
