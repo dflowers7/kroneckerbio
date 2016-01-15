@@ -1,4 +1,4 @@
-function sol = accumulateOdeFwdSundials(options, tF, t_get, discontinuities, x0, dx0dT, g0, nx, nT, ng, delta, delta_sens, events, is_finished, freeMemoryOnFinish)
+function sol = accumulateOdeFwdSundials(options_x, options_dxdT, tF, t_get, discontinuities, x0, dx0dT, g0, nx, nT, ng, delta, delta_sens, events, is_finished, freeMemoryOnFinish)
 % Inputs
 %   nT: [ integer scalar ]
 %       Number of parameters for which sensitivities are to be calculated
@@ -24,15 +24,15 @@ function sol = accumulateOdeFwdSundials(options, tF, t_get, discontinuities, x0,
 %           Values of states at each event time.
 
 % Clean up inputs
-if nargin < 11
+if nargin < 16
     freeMemoryOnFinish = true;
-    if nargin < 10
+    if nargin < 15
         is_finished = [];
-        if nargin < 9
+        if nargin < 14
             events = [];
-            if nargin < 8
+            if nargin < 13
                 delta_sens = [];
-                if nargin < 7
+                if nargin < 12
                     delta = [];
                 end
             end
@@ -83,18 +83,24 @@ eventArraySize = 10; % maximum number of events that can be stored in the initia
 sol.ie = zeros(1,eventArraySize);
 sol.te = zeros(1,eventArraySize);
 sol.xe = zeros(nx,eventArraySize);
+if isSens
+    sol.dxedT = zeros(nx, nT, eventArraySize);
+end
+if isQuad
+    sol.ge = zeros(ng, eventArraySize);
+end
 nevents = 0; % number of events that have occurred
 
 % Handle special case where t_get includes the initial time. CVODES errors
 % if the first requested time is too close to the initial time.
 tget_is_t0 = t_get == t0;
 sol.t(tget_is_t0) = t0;
-sol.x(:,tget_is_t0) = x0 + delta(t0, x0);
+sol.x(:,tget_is_t0) = repmat(x0 + delta(t0, x0), 1, sum(tget_is_t0));
 if isSens
-    sol.dxdT(:,:,tget_is_t0) = dx0dT + delta_sens(t0, x0);
+    sol.dxdT(:,:,tget_is_t0) = repmat(dx0dT + delta_sens(t0, x0), 1, 1, sum(tget_is_t0));
 end
 if isQuad
-    sol.g(:, tget_is_t0) = g0;
+    sol.g(:, tget_is_t0) = repmat(g0, 1, sum(tget_is_t0));
 end
 t_get(tget_is_t0) = NaN; % Placeholder to ensure sizes of arrays match up, while removing t0 from list
 
@@ -124,9 +130,9 @@ while ~done
         % post-discontinuity values and moves the final time to the next
         % discontinuity
         %options = CVodeSetOptions(options, 'StopTime', tstopi);
-        CVodeReInit(tstart_i, x_stop, options);
+        CVodeReInit(tstart_i, x_stop, options_x);
         if isSens && ~isempty(delta_sens)
-            CVodeSensReInit(x_s_stop)
+            CVodeSensReInit(x_s_stop, options_dxdT);
         end
     end
     
@@ -174,6 +180,12 @@ while ~done
                     sol.ie = [sol.ie zeros(1,eventArraySize)];
                     sol.te = [sol.te zeros(1,eventArraySize)];
                     sol.xe = [sol.xe zeros(nx, eventArraySize)];
+                    if isSens
+                        sol.dxedT = cat(3, sol.dxedT, zeros(nx, nT, eventArraySize));
+                    end
+                    if isQuad
+                        sol.ge = [sol.ge zeros(ng, eventArraySize)];
+                    end
                     eventArraySize = 2*eventArraySize;
                 end
                 sol.ie(nevents) = ie_cur;
@@ -226,6 +238,12 @@ end
 sol.ie = sol.ie(1:nevents);
 sol.te = sol.te(1:nevents);
 sol.xe = sol.xe(:,1:nevents);
+if isSens
+    sol.dxedT = sol.dxedT(:,:,1:nevents);
+end
+if isQuad
+    sol.ge = sol.ge(:,1:nevents);
+end
 
 % Free memory
 if freeMemoryOnFinish

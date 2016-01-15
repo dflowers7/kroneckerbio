@@ -81,20 +81,28 @@ opts.ComplexStep = true;
 obsSelect = observationSelect(tGet);
 
 opts.Normalized = false;
+opts.Integrator = 'sundials';
+sim2_sundials = SimulateSensitivity(m, con, obsSelect, opts);
+opts.Integrator = 'ode15s';
 sim1 = SimulateSensitivity(m, con, max(tGet), opts);
 sim2 = SimulateSensitivity(m, con, obsSelect, opts);
 sim3 = FiniteSimulateSensitivity(m, con, obsSelect, opts);
 
 a.verifyEqual(sim1.dydT(tGet,1:m.ny), sim3.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
 a.verifyEqual(sim2.dydT, sim3.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim2_sundials.dydT, sim3.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
 
 opts.Normalized = true;
+opts.Integrator = 'sundials';
+sim5_sundials = SimulateSensitivity(m, con, obsSelect, opts);
+opts.Integrator = 'ode15s';
 sim4 = SimulateSensitivity(m, con, max(tGet), opts);
 sim5 = SimulateSensitivity(m, con, obsSelect, opts);
 sim6 = FiniteSimulateSensitivity(m, con, obsSelect, opts);
 
 a.verifyEqual(sim4.dydT(tGet,1:m.ny), sim6.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
 a.verifyEqual(sim5.dydT, sim6.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim5_sundials.dydT, sim6.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
 end
 
 function verifySensitivityEvent(a, m, con, obs, opts)

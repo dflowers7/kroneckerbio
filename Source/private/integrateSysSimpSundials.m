@@ -10,7 +10,7 @@ u = con.u;
 
 discontinuities = con.Discontinuities;
 RelTol = opts.RelTol;
-AbsTol = opts.AbsTol;
+AbsTol = opts.AbsTol(1:nx);
 
 % Construct system
 [der, jac, del] = constructSystem();
@@ -30,7 +30,7 @@ sundials_options = initializeStateOdesSundials(der, jac, t0, x0_, RelTol, AbsTol
 
 % Integrate f over time
 freeMemoryOnFinish = true;
-sol = accumulateOdeFwdSundials(sundials_options, tF, t_get, discontinuities, x0_, [], [], nx, [], [], del, [], eve, fin, freeMemoryOnFinish);
+sol = accumulateOdeFwdSundials(sundials_options, [], tF, t_get, discontinuities, x0_, [], [], nx, [], [], del, [], eve, fin, freeMemoryOnFinish);
 
 % Work down
 int.Type = 'Integration.System.Simple';
