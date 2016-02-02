@@ -9,7 +9,7 @@ function [] = startup_STB(stb)
 % harcoded when startup_STB.m was created.
 
 if nargin == 0
-  stb_path = 'C:\Users\dflow\Dropbox (Personal)\Complement\ModelInKronecker0.5\kroneckerbio\External\sundials-2.6.2\..';
+  stb_path = '/mylocal/Dropbox/Complement/ModelInKronecker0.5/kroneckerbio/External/sundials-2.6.2/..';
   stb = fullfile(stb_path,'sundialsTB');
 end
   

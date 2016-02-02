@@ -41,7 +41,11 @@ else
     if ~use_finite
         switch opts.Integrator
             case 'sundials'
-                ints = integrateSensSimpSundials(m, con, tF, eve, fin, t_get, opts);
+                if any(opts.AdjointOutputSensitivities)
+                    ints = integrateSensAdjSimpSundials(m, con, tF, eve, fin, t_get, opts);
+                else
+                    ints = integrateSensSimpSundials(m, con, tF, eve, fin, t_get, opts);
+                end
             otherwise
                 ints = integrateSensSimp(m, con, tF, eve, fin, t_get, opts);
         end

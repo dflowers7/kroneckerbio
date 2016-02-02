@@ -71,9 +71,7 @@ t_stop = discontinuities;
 % Initialize solution vectors t and x
 sol.t = zeros(1,N);
 sol.x = zeros(nx,N);
-if isQuad
-    sol.g = zeros(ng, N);
-end
+sol.g = zeros(ng, N);
 if isSens
     sol.dxdT = zeros(nx, nT, N);
 end
@@ -83,11 +81,9 @@ eventArraySize = 10; % maximum number of events that can be stored in the initia
 sol.ie = zeros(1,eventArraySize);
 sol.te = zeros(1,eventArraySize);
 sol.xe = zeros(nx,eventArraySize);
+sol.ge = zeros(ng, eventArraySize);
 if isSens
     sol.dxedT = zeros(nx, nT, eventArraySize);
-end
-if isQuad
-    sol.ge = zeros(ng, eventArraySize);
 end
 nevents = 0; % number of events that have occurred
 
@@ -96,11 +92,9 @@ nevents = 0; % number of events that have occurred
 tget_is_t0 = t_get == t0;
 sol.t(tget_is_t0) = t0;
 sol.x(:,tget_is_t0) = repmat(x0 + delta(t0, x0), 1, sum(tget_is_t0));
+sol.g(:, tget_is_t0) = repmat(g0, 1, sum(tget_is_t0));
 if isSens
     sol.dxdT(:,:,tget_is_t0) = repmat(dx0dT + delta_sens(t0, x0), 1, 1, sum(tget_is_t0));
-end
-if isQuad
-    sol.g(:, tget_is_t0) = repmat(g0, 1, sum(tget_is_t0));
 end
 t_get(tget_is_t0) = NaN; % Placeholder to ensure sizes of arrays match up, while removing t0 from list
 
@@ -180,11 +174,9 @@ while ~done
                     sol.ie = [sol.ie zeros(1,eventArraySize)];
                     sol.te = [sol.te zeros(1,eventArraySize)];
                     sol.xe = [sol.xe zeros(nx, eventArraySize)];
+                    sol.ge = [sol.ge zeros(ng, eventArraySize)];
                     if isSens
                         sol.dxedT = cat(3, sol.dxedT, zeros(nx, nT, eventArraySize));
-                    end
-                    if isQuad
-                        sol.ge = [sol.ge zeros(ng, eventArraySize)];
                     end
                     eventArraySize = 2*eventArraySize;
                 end
@@ -218,7 +210,7 @@ while ~done
             sol.x(:,tget_is_i) = x_get;
             if isQuad
                 x_q_get = x_q(:,trecord_is_tget);
-                sol.x_q(:,tget_is_i) = x_q_get;
+                sol.g(:,tget_is_i) = x_q_get;
             end
             if isSens
                 x_s_get = x_s(:,:,trecord_is_tget);
@@ -234,15 +226,13 @@ while ~done
     
 end
 
-% Filter out reserved but unused values
+% Filter out allocated but unused values
 sol.ie = sol.ie(1:nevents);
 sol.te = sol.te(1:nevents);
 sol.xe = sol.xe(:,1:nevents);
+sol.ge = sol.ge(:,1:nevents);
 if isSens
     sol.dxedT = sol.dxedT(:,:,1:nevents);
-end
-if isQuad
-    sol.ge = sol.ge(:,1:nevents);
 end
 
 % Free memory

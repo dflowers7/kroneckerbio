@@ -3,7 +3,7 @@ function [] = install_STB_Kronecker
 % INSTALL_STB_MATLAB Non-interactive compilation and installtion of
 % sundialsTB for use in the Kronecker package
 
-% Modified for Kronecker by David Flowers
+% Modified for KroneckerBio by David Flowers
 % Radu Serban <radu@llnl.gov>
 % LLNS Copyright Start
 % Copyright (c) 2014, Lawrence Livermore National Security

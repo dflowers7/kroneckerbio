@@ -145,6 +145,13 @@ for it = 1:nte
     int.dyedT(:,it) = vec(dyedx_i * dxedT_i + dyedu_i * duedT_i + dyedk_i * dkdT); % y_x * x_T + y_u * u_T + y_k * k_T -> y_T -> yT_
 end
 
+if normalized
+    % Normalize sensitivities
+    int.dxedT = normalizeDerivatives(T, int.dxedT);
+    int.duedT = normalizeDerivatives(T, int.duedT);
+    int.dyedT = normalizeDerivatives(T, int.dyedT);
+end
+
 int.sol = sol;
 
 % End of function
