@@ -127,14 +127,14 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           currently doing. stop is a flag that, when set to true, stops
 %           optimization. See the documentation for optimization options
 %           for more details.
-%       .ConstraintObj [ objective struct matrix n_obj_constraints by n_con]
-%           If set, the provided objective struct is used as a nonlinear
+%       .ConstraintObj [ cell vector of objective struct matrices n_obj_constraints by n_con]
+%           If set, the provided objective structs are used as a nonlinear
 %           constraint on the fit. The fit will be constrained to keeping
 %           the objective value less than or equal to opts.ConstraintVal.
 %           This option is only supported for the fmincon solver.
-%       .ConstraintVal
-%           Set this value to the upper bound on the constraint objective
-%           function's value. The constraint objective function is set in
+%       .ConstraintVal [ vector of doubles ]
+%           Set each element of the vector to the upper bound on the
+%           corresponding constraint objective function's value in
 %           opts.ConstraintObj.
 %       .GlobalOptimization [ logical scalar {false} ]
 %           Use global optimization in addition to fmincon
@@ -299,7 +299,11 @@ intOpts = opts;
 %% Local optimization options
 
 obj_constraint = opts.ConstraintObj;
+if isstruct(obj_constraint)
+    obj_constraint = {obj_constraint};
+end
 isNonlinearConstraint = ~isempty(obj_constraint);
+nConstraints = numel(obj_constraint);
 
 localOpts = optimoptions(opts.Solver);
 localOpts.TolFun                  = opts.TolOptim;
@@ -475,14 +479,16 @@ if opts.ParallelizeExperiments
     end
     
     % Generate constraint function parts for each worker
-    slave_constraints = cell(1,NumWorkers);
-    for ii = 1:NumWorkers
-        slave_constraints{ii} = generateSlaveObjective(m, con, obj_constraint, opts, intOpts, T_experiment, icon_worker{ii}, solverFun, solverGrad);
+    slave_constraints = cell(numel(obj_constraint),NumWorkers);
+    for ii = 1:numel(obj_constraint)
+        for jj = 1:NumWorkers
+            slave_constraints{ii,jj} = generateSlaveObjective(m, con, obj_constraint{ii}, opts, intOpts, T_experiment, icon_worker{jj}, solverFun, solverGrad);
+        end
     end
     
     % Distribute slave constraint functions to workers
     spmd
-        slave_constraints = codistributed(slave_constraints);
+        slave_constraints = codistributed(slave_constraints, codistributor('1d',2));
     end
     
     fminconObjective = @parallelExperimentObjective;
@@ -697,7 +703,7 @@ end
 %         GC = zeros(nT,1);
         if strcmp(opts.Algorithm, 'sqp') && any(abs(T - lastT) > opts.MaxStepSize)
             % Don't allow steps larger than the max step size
-            c = nan;
+            c = nan(nConstraints,1);
             if nargout > 1
                 GC = nan(nT,1);
             end
@@ -716,37 +722,43 @@ end
         [m, con] = updateAll(m, con, T, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
         
         % Integrate system to get objective function value
+        c = zeros(nConstraints,1);
         if nargout < 2
-            try
-                c = solverFun(m, con, obj_constraint, intOpts);
-            catch ME
-                % If an integration error, return a NaN objective function
-                % value
-                switch ME.identifier
-                    case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                        c = nan;
-                    otherwise
-                        rethrow(ME)
+            for i = 1:nConstraints
+                try
+                    c(i) = solverFun(m, con, obj_constraint{i}, intOpts);
+                catch ME
+                    % If an integration error, return a NaN objective function
+                    % value
+                    switch ME.identifier
+                        case 'KroneckerBio:accumulateOde:IntegrationFailure'
+                            c(i) = nan;
+                        otherwise
+                            rethrow(ME)
+                    end
                 end
             end
         end
         
         % Integrate sensitivities or use adjoint to get objective gradient
         if nargout == 2
-            try
-                [c, GC] = solverGrad(m, con, obj_constraint, intOpts);
-            catch ME
-                switch ME.identifier
-                    case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                        c = nan;
-                        GC = nan(nT,1);
-                    otherwise
-                        rethrow(ME)
+            GC = zeros(nT, nConstraints);
+            for i = 1:nConstraints
+                try
+                    [c(i), GC(:,i)] = solverGrad(m, con, obj_constraint{i}, intOpts);
+                catch ME
+                    switch ME.identifier
+                        case 'KroneckerBio:accumulateOde:IntegrationFailure'
+                            c = nan(nConstraints,1);
+                            GC = nan(nConstraints,nT);
+                        otherwise
+                            rethrow(ME)
+                    end
                 end
             end
         end
         
-        c = c-opts.ConstraintVal;
+        c = c(:)-opts.ConstraintVal(:);
         
         ceq = [];
         GCeq = [];
@@ -808,27 +820,38 @@ end
             
             spmd
                 this_slave_objective = getLocalPart(slave_constraints);
-                G_d = this_slave_objective{1}(T);
+                G_d = zeros(1,nConstraints);
+                for ci = 1:nConstraints
+                    G_d(ci) = this_slave_objective{ci}(T);
+                end
             end
             
         else
             
             spmd
                 this_slave_objective = getLocalPart(slave_constraints);
-                [G_d, GC_d] = this_slave_objective{1}(T);
+                G_d = zeros(1,nConstraints);
+                GC_d = zeros(nT, nConstraints);
+                for ci = 1:nConstraints
+                    [G_d(ci), GC_d(:,ci)] = this_slave_objective{1}(T);
+                end
             end
            
-            % Sum slave objective function gradients to get total gradient
-            GC = cell(NumWorkers,1);
-            for wi = 1:NumWorkers
-                GC{wi} = GC_d{wi};
-            end
+%             % Sum slave objective function gradients to get total gradient
+%             GC = cell(NumWorkers,1);
+%             for wi = 1:NumWorkers
+%                 GC{wi} = GC_d{wi};
+%             end
+            
             
             switch opts.Solver
                 case 'fmincon'
-                    GC = horzcat(GC{:});
-                    GC = sum(GC,2);
+                    GC = zeros(nT, nConstraints);
+                    for wi = 1:NumWorkers
+                        GC = GC + GC_d{wi};
+                    end
                 case 'lsqnonlin'
+                    error('lsqnonlin should have no nonlinear constraints!')
                     GC = vertcat(GC{:});
             end
             
@@ -844,10 +867,11 @@ end
             case 'fmincon'
                 c = sum(c,1);
             case 'lsqnonlin'
+                error('lsqnonlin should have no nonlinear constraints!')
                 % Don't do anything extra
         end
         
-        c = c - opts.ConstraintVal;
+        c = c(:) - opts.ConstraintVal(:);
         
         ceq = [];
         GCeq = [];
