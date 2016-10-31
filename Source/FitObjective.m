@@ -312,7 +312,22 @@ switch opts.Solver
         solverGrad                          = @computeError;
 end
 localOpts.Algorithm           = opts.Algorithm;
-localOpts.OutputFcn           = @isTerminalObj;
+providedOutputFcn             = opts.OutputFcn;
+
+if strcmp(opts.Algorithm, 'sqp')
+    % Prevent sqp algorithm from automatically normalizing parameters
+    localOpts.ScaleProblem = 'none';
+    
+    % Set output function that updates what the last parameter set used was
+    localOpts.OutputFcn = @outfun;
+else
+    localOpts.OutputFcn = @isTerminalObj;
+end
+
+    function stop = outfun(x, optimValues, state)
+        lastT = x;
+        stop = isTerminalObj(x, optimValues, state);
+    end
 
 if verbose
     localOpts.Display = 'iter';
@@ -330,25 +345,6 @@ if strcmpi(globalOpts.Algorithm, 'multistart') && globalOpts.UseParallel
 end
 
 %% Normalize parameters
-
-if strcmp(opts.Algorithm, 'sqp')
-    % Prevent sqp algorithm from automatically normalizing parameters
-    localOpts.ScaleProblem = 'none';
-    
-    % Set output function that updates what the last parameter set used was
-    localOpts.OutputFcn = @outfun;
-else
-    localOpts.OutputFcn = opts.OutputFcn;
-end
-
-    function stop = outfun(x, optimValues, state)
-        lastT = x;
-        if ~isempty(opts.OutputFcn)
-            stop = opts.OutputFcn(x, optimValues, state);
-        else
-            stop = false;
-        end
-    end
 
 if opts.Normalized
     % Normalize starting parameters and bounds
@@ -590,7 +586,7 @@ end
         end
         
         if ~isempty(opts.OutputFcn)
-            stop = stop || opts.OutputFcn(x, optimValues, state);
+            stop = stop || providedOutputFcn(x, optimValues, state);
         end
     end
 
