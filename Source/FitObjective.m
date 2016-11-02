@@ -473,7 +473,7 @@ for iRestart = 1:opts.Restart+1
         
         % Create local optimization problem
         %   Used as a subset/refinement of global optimization
-        localProblem = createOptimProblem('fmincon', 'objective', @objective, ...
+        localProblem = createOptimProblem('fmincon', 'objective', fminconObjective, ...
             'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
             'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
             'options', localOpts);
@@ -492,13 +492,13 @@ for iRestart = 1:opts.Restart+1
                 [That, G, exitflag] = run(ms, localProblem, globalOpts.nStartPoints);
             case 'patternsearch'
                 psOpts = psoptimset('MaxIter', globalOpts.MaxIter, 'UseParallel', globalOpts.UseParallel);
-                [That, G, exitflag] = patternsearch(@objective, That, [], [], ...
+                [That, G, exitflag] = patternsearch(fminconObjective, That, [], [], ...
                     opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, [], psOpts);
             otherwise
                 error('KroneckerBio:FitObjective:InvalidGlobalOptAlgorithm', 'Global optimization algorithm %s not recognized.', globalOpts.Algorithm)
         end
         
-        [~, D] = objective(That); % since global solvers don't return gradient at endpoint
+        [~, D] = fminconObjective(That); % since global solvers don't return gradient at endpoint
         
     else
         if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
@@ -517,7 +517,7 @@ for iRestart = 1:opts.Restart+1
     % Abortion values are not returned by fmincon and must be retrieved
     if aborted
         That = Tabort;
-        [G, D] = objective(That);
+        [G, D] = fminconObjective(That);
     end
     
     % Re-apply stiff bounds
