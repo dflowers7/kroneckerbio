@@ -833,7 +833,7 @@ end
                 G_d = zeros(1,nConstraints);
                 GC_d = zeros(nT, nConstraints);
                 for ci = 1:nConstraints
-                    [G_d(ci), GC_d(:,ci)] = this_slave_objective{1}(T);
+                    [G_d(ci), GC_d(:,ci)] = this_slave_objective{ci}(T);
                 end
             end
            
