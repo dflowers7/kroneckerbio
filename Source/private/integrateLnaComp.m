@@ -30,7 +30,7 @@ else
 end
 
 % Integrate x over time
-sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx+numel(upperVInd)), del, eve, fin);
+sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx+numel(upperVInd)), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.Lna.Complex';
