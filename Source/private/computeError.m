@@ -1,10 +1,23 @@
-function [G,D] = computeError(m, con, obj, opts)
-% G = computeObj(m, con, obj, opts)
-% This function computes the total objective function value for a vector of
-% con and a matrix of obj.
+function [G,D,Hv] = computeError(m, con, obj, opts, v)
+% [G,D,Hv] = computeError(m, con, obj, opts, v) 
+% This function computes the vector of errors G for an objective function
+% obj using the simulation defined by the model m and the experimental
+% conditions con. It can also calculate the gradient of the errors D,
+% returned as an nErrors-by-nT matrix, and the directional second
+% derivative of the errors Hv in the direction of nT-by-1 vector v,
+% returned as an nErrors-by-nT matrix.
 verbose = logical(opts.Verbose);
 verbose_all = max(verbose-1,0);
 calcJac = nargout > 1;
+calcHv = nargout > 2;
+assert(nargin > 4 || ~calcHv, 'KroneckerBio:computeError:HvRequiresv', ...
+    'Computing a directional second derivative requires the direction v be provided.')
+
+if calcHv
+    normv = norm(v);
+    dirv = v/normv;
+    stepsize = 1e-8;
+end
 
 % Constants
 n_con = numel(con);
@@ -47,6 +60,26 @@ for i_con = 1:n_con
         ints = integrateAllSens(m, con(i_con), obj(:,i_con), opts_i);
     end
     
+    if calcHv
+        inds = ParameterMappings(opts);
+        
+        % Update model parameters
+        dk = zeros(m.nk,1);
+        dk(inds.k) = dk(inds.k) + 1i*stepsize*dirv(inds.Tk);
+        mv = m.Update(m.k + dk);
+        
+        % Update experiment parameters
+        ds = zeros(m.ns,1);
+        ds(inds.s{i_con}) = 1i*stepsize*dirv(inds.Ts{i_con});
+        dq = zeros(con(icon).nq,1);
+        dq(inds.q{i_con}) = 1i*stepsize*dirv(inds.Tq{i_con});
+        dh = zeros(con(icon).nh,1);
+        dh(inds.h{i_con}) = 1i*stepsize*dirv(inds.Th{i_con});
+        conv = con(i_con).Update(con(i_con).s+ds, con(i_con).q+dq, con(i_con).h+dh);
+        
+        intsv = integrateAllSens(mv, conv, obj(:,i_con), opts_i);
+    end
+    
     % Add fields for prior objectives
     [ints.UseParams] = deal(opts.UseParams);
     [ints.UseSeeds] = deal(UseSeeds_i);
@@ -75,6 +108,10 @@ for i_con = 1:n_con
                 D = [D; zeros(addsize,nT)];
             end
             D(count:findex,:) = D(count:findex,:) + opts.ObjWeights(i_obj,i_con) .* D_i;
+        end
+        
+        if calcHv
+            Hv_i = obj(i_obj,i_con).derrdT(intsv(i_obj));
         end
         
         count = count + numel(G_i);
