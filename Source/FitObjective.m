@@ -118,6 +118,10 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           the optimization will run serially. This option has no effect
 %           on global optimization; set opts.GlobalOpts.UseParallel to true
 %           to parallelize global optimization.
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %       .GlobalOptimization [ logical scalar {false} ]
 %           Use global optimization in addition to fmincon
 %       .GlobalOpts [ options struct scalar {} ]
@@ -183,6 +187,7 @@ defaultOpts.MaxIter          = 1000;
 defaultOpts.MaxFunEvals      = 5000;
 
 defaultOpts.ParallelizeExperiments = false;
+defaultOpts.TimeoutDuration = [];
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];

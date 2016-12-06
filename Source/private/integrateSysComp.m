@@ -17,7 +17,7 @@ else
 end
 
 % Integrate f over time
-sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin);
+sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.System.Complex';

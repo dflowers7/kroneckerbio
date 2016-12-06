@@ -101,6 +101,10 @@ function [best, data] = BestTopologyExperiment(m, con, obj, objPriorParams, objP
 %           parameters whose uncertainty will be optimized
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 % 
 %   Outputs
 %   best: [ positive integer ]
@@ -147,6 +151,8 @@ defaultOpts.Normalized     = true;
 defaultOpts.UseAdjoint     = true;
 defaultOpts.LowerBound     = 0;
 defaultOpts.UpperBound     = inf;
+
+defaultOpts.TimeoutDuration = [];
 
 % Topology probability
 defaultOpts.PriorTopology  = zeros(nTop,1) + 1/nTop; % Uniform prior

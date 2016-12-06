@@ -126,6 +126,8 @@ defaultOpts.Verbose        = 1;
 defaultOpts.RelTol         = [];
 defaultOpts.AbsTol         = [];
 
+defaultOpts.TimeoutDuration = [];
+
 defaultOpts.UseParams      = cell(nTop,1); 
 for i=1:nTop; defaultOpts.UseParams{i} = 1:m(i).nk;end
 defaultOpts.UseSeeds         = [];

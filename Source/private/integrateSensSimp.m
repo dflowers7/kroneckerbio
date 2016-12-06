@@ -42,7 +42,7 @@ else
 end
 
 % Integrate [f; dfdT] over time
-sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT), del, eve, fin);
+sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.Sensitivity.Simple';
