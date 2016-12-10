@@ -177,6 +177,9 @@ obj.d2Gdhdq = @d2Gdhdq;
 obj.err = @err;
 obj.derrdT = @derrdT;
 
+% GenerateObjective functions
+obj.dGdT = @dGdT;
+
 % Information theory
 obj.p = @p;
 obj.logp = @logp;
@@ -295,6 +298,10 @@ end
 function val = derrdT(int)
 nT = int.nT;
 val = sparse(0,nT);
+end
+
+function val = dGdT(int)
+val = sparse(int.nT,1);
 end
 
 % For Objective.Information

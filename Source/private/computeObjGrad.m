@@ -135,3 +135,114 @@ for i_con = 1:n_con
 end
 
 if opts.Verbose; fprintf('Summary: |dGdT| = %g\n', norm(D)); end
+
+end
+
+function [G,D] = objGrad(ints)
+
+if isempty(ints)
+    G = 0;
+    D = [];
+    return
+end
+
+[n_obj,n_con] = size(ints);
+
+% Extract some useful variables
+nT = ints(1).nT;
+
+G = 0;
+D = zeros(nT,1);
+
+for i_con = 1:n_con
+    
+%     % Extract continuous term
+%     if opts.continuous(i_con)
+%         G_cont = ints(1).sol.y(nx+1,end);
+%         
+%         dGdTStart = nx+1+nx*inT+1;
+%         dGdTEnd   = nx+1+nx*inT+inT;
+%         D_cont = ints(1).sol.y(dGdTStart:dGdTEnd,end);
+%     else
+%         G_cont = 0;
+%         D_cont = zeros(nT,1);
+%     end
+    
+    TisExperiment = ints(1,i_con).TisExperiment;
+    
+    %discrete_times_all = cell(n_obj,1);
+    
+    for i_obj = 1:n_obj
+        %[G_i, temp] = obj(i_obj,i_con).G(ints(i_obj,i_con));
+        %discrete_times_all{i_obj} = row(unique(temp));
+        G_i = obj(i_obj,i_con).G(ints(i_obj,i_con));
+        G = G + ints(i_obj,i_con).ObjWeight * G_i;
+        
+%         Dk_i = ints(i_obj,i_con).dGdk;
+%         Ds_i = ints(i_obj,i_con).dGds;
+%         Dq_i = ints(i_obj,i_con).dGdq;
+%         Dh_i = ints(i_obj,i_con).dGdh;
+%         if opts.Normalized
+%             Dk_i = Dk_i.*ints(i_obj).k;
+%             Ds_i = Ds_i.*ints(i_obj).s;
+%             Dq_i = Dq_i.*ints(i_obj).q;
+%             Dh_i = Dh_i.*ints(i_obj).h;
+%         end
+%         D_disc_i = [Dk_i(ints(i_obj,i_con).UseParams); Ds_i(ints(i_obj,i_con).UseSeeds); Dq_i(ints(i_obj,i_con).UseInputControls); Dh_i(ints(i_obj,i_con).UseDoseControls)];
+%         
+%         n_disc = numel(discrete_times_all{i_obj});
+%         for i_disc = 1:n_disc
+%             ti = discrete_times_all{i_obj}(i_disc);
+%             if obj(i_obj).Complex
+%                 dydT_i = reshape(ints(i_obj).dydT(ti), ny, inT);
+%             else
+%                 dydT_i = reshape(ints(i_obj).dydT(:,i_disc), ny, inT);
+%             end
+%             
+%             dGdy_i = row(obj(i_obj,i_con).dGdy(ti, ints(i_obj)));
+%             
+%             % D = sum(dGdy(t) *{y.y} dydT(t), t) + dGdT
+%             D_disc_i = D_disc_i + vec(dGdy_i * dydT_i); % _y * y_T -> _T -> T_
+%         end
+        
+        D_i = obj.dGdT(ints(i_obj,i_con));
+        if opts.Normalized
+            D_i = D_i.*ints(i_obj,i_con).T;
+        end
+        
+        D(TisExperiment) = D(TisExperiment) + ints(i_obj,i_con).ObjWeight * D_i;
+    end
+    
+%     % Sum discrete and continuous terms
+%     Di = zeros(nT,1);
+%     
+%     % Rate parameters are the same
+%     inds_k = 1:nTk;
+%     Di(inds_k) = D_cont(inds_k) + D_disc(inds_k);
+%     
+%     % s parameters are different
+%     ind_Ts_start = nTk + sum(sum(opts.UseSeeds(:,1:i_con-1)));
+%     inds_s = ind_Ts_start+1:ind_Ts_start+inTs;
+%     inds_si = nTk+1:nTk+inTs;
+%     Di(inds_s) = D_cont(inds_si) + D_disc(inds_si);
+%     
+%     % q parameters are different
+%     Tqind = nTk + nTs + sum(cellfun(@sum, opts.UseInputControls(1:i_con-1)));
+%     inds_q = Tqind+1:Tqind+inTq;
+%     inds_qi = nTk+inTs+1:nTk+inTs+inTq;
+%     Di(inds_q) = D_cont(inds_qi) + D_disc(inds_qi);
+%     
+%     % h parameters are different
+%     Thind = nTk + nTs + nTq + sum(cellfun(@sum, opts.UseDoseControls(1:i_con-1)));
+%     inds_h = Thind+1:Thind+inTh;
+%     inds_hi = nTk+inTs+inTq+1:inT;
+%     Di(inds_h) = D_cont(inds_hi) + D_disc(inds_hi);
+%     
+%     % Add to cumulative goal value
+%     G = G + G_cont + G_disc;
+%     D = D + Di;
+    
+%    if verbose_all; fprintf('iCon = %d\t|dGdT| = %g\tTime = %0.2f\n', i_con, norm(D_cont + D_disc), toc); end
+end
+
+end

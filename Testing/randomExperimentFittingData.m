@@ -1,4 +1,4 @@
-function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints)
+function [obj, opts, mVariant, conVariant, obj_c] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints)
 % Generate random experiments for testing objective-based Kronecker
 % functions with multiple experiments
 % 
@@ -18,6 +18,14 @@ function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con,
 %
 % (c) 2016 David Flowers
 % This work is released under the MIT license.
+
+if nargin < 7
+    nConstraints = [];
+end
+
+if isempty(nConstraints)
+    nConstraints = 0;
+end
 
 % Input checks
 assert(isscalar(con), 'con must be a scalar.')
@@ -157,6 +165,39 @@ measurements = {sim.measurements};
 obj = objectiveZero([nExperiments nExperiments]);
 for ei = nExperiments:-1:1
     obj(ei,ei) = obs(ei).Objective(measurements{ei});
+end
+
+% Determine random time points, experiments, and outputs for the constraint
+% functions
+obj_c = objectiveZero(0);
+for i = 1:nConstraints
+    timelist_c = tF*rand(nConstraints, 1);
+    outputlist_c = randi(m.ny, nConstraints, 1);
+    experimentlist_c = randi(nExperiments, nConstraints, 1);
+    
+    sd_c = sdLinear(0.1, 0.01);
+    
+    % Get observations
+    for ei = nExperiments:-1:1
+        isExperiment = experimentlist_c == ei;
+        obs_c(ei) = observationLinearWeightedSumOfSquares(...
+            outputlist_c(isExperiment),...
+            timelist_c(isExperiment),...
+            sd_c,...
+            sprintf('Experiment %d constraint', ei));
+    end
+    
+    % Simulate new experiments to get constraint values
+    sim = SimulateSystem(mVariant, conVariant, obs, opts);
+    measurements = {sim.measurements};
+    
+    % Create objective functions for constraints
+    obj_c = objectiveZero([nExperiments nExperiments]);
+    for ei = nExperiments:-1:1
+        % Add thirty percent to the value to ensure the constraint can be
+        % reasonably met
+        obj_c(ei,ei) = obs_c(ei).Objective(measurements{ei}*1.3);
+    end
 end
 
 end

@@ -103,6 +103,8 @@ obs = pastestruct(observationZero(), obs);
         obj.err = @err;
         obj.derrdT = @derrdT;
         
+        obj.dGdT = @dGdT;
+        
         obj.p = @p;
         obj.logp = @logp;
         obj.F = @(sol)F(outputlist, timelist, discrete_times, sd, sol);
@@ -165,11 +167,25 @@ obs = pastestruct(observationZero(), obs);
             end
         end
         
+        function val = dGdT(int)
+            
+            [dybardT, sigma, dsigmady] = evaluate_grad(outputlist, timelist, discrete_times, sd, int);
+            val = 2*err(int).'*derrdT(int) + (2./sigma.*dsigmady).'*dybardT;
+            val = val(:);
+            
+%             val_test = zeros(size(val));
+%             for i = numel(discrete_times):-1:1
+%                 val_test = val_test + dGdy(discrete_times(i), int).'*dybardT(timelist == discrete_times(i),:);
+%             end
+            
+        end
+        
         function val = derrdT(int)
             
-            ybar = evaluate_sol(outputlist, timelist, discrete_times, sd, int);
+            %ybar = evaluate_sol(outputlist, timelist, discrete_times, sd, int);
+            e = err(int);
             [dybardT, sigma, dsigmady] = evaluate_grad(outputlist, timelist, discrete_times, sd, int);
-            val = bsxfun(@times, 1./sigma.*(1-ybar./sigma.*dsigmady), dybardT);
+            val = bsxfun(@times, 1./sigma.*(1-e.*dsigmady), dybardT);
             
         end
         

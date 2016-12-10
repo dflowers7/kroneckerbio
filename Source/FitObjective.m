@@ -282,6 +282,10 @@ T0 = collectActiveParameters(m, con, opts.UseParams, opts.UseSeeds, opts.UseInpu
 opts.RelTol = fixRelTol(opts.RelTol);
 
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
+if opts.UseAdjoint
+    warning('UseAdjoint is currently not implemented in this version of FitObjective. Switching to false...')
+    opts.UseAdjoint = false;
+end
 if strcmp(opts.Solver, 'lsqnonlin') && opts.UseAdjoint
     warning('KroneckerBio:FitObjective:AdjointNotSupportedForLsqnonlin', ...
         'Adjoint method currently not supported for lsqnonlin. Switching to forward method...')
@@ -294,7 +298,7 @@ opts.LowerBound = fixBounds(opts.LowerBound, opts.UseParams, opts.UseSeeds, opts
 opts.UpperBound = fixBounds(opts.UpperBound, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
 
 %% Options structure for integration
-intOpts = opts;
+%intOpts = opts;
 
 %% Local optimization options
 
@@ -303,7 +307,6 @@ if isstruct(obj_constraint)
     obj_constraint = {obj_constraint};
 end
 isNonlinearConstraint = ~isempty(obj_constraint);
-nConstraints = numel(obj_constraint);
 
 localOpts = optimoptions(opts.Solver);
 localOpts.TolFun                  = opts.TolOptim;
@@ -318,8 +321,6 @@ switch opts.Solver
         localOpts.RelLineSrchBndDuration  = Inf;
         localOpts.TolCon                  = 1e-6;
         localOpts.SpecifyConstraintGradient = isNonlinearConstraint;
-        solverFun                         = @computeObj;
-        solverGrad                        = @computeObjGrad;
     case 'lsqnonlin'
         localOpts.Jacobian                  = 'on'; % For older versions of MATLAB
         % The following options are for newer versions of MATLAB that
@@ -329,8 +330,6 @@ switch opts.Solver
         localOpts.SpecifyObjectiveGradient  = true; % For newer versions of MATLAB
         localOpts.MaxFunctionEvaluations    = opts.MaxFunEvals;
         localOpts.MaxIterations             = opts.MaxIter;        
-        solverFun                           = @computeError;
-        solverGrad                          = @computeError;
         
         assert(~isNonlinearConstraint, 'KroneckerBio:FitObjective:lsqnonlinNonlinearConstraintNotSupported', ...
             'The lsqnonlin solver does not support nonlinear constraints. Use the fmincon solver instead.')
@@ -403,14 +402,6 @@ That = T0;
 Gbest = inf;
 Tbest = T0;
 
-% Check for parallel toolbox if parallel optimization is specified
-if opts.ParallelizeExperiments && isempty(ver('distcomp'))
-    warning('KroneckerBio:FitObjective:ParallelToolboxMissing', ...
-        ['opts.ParallelizeExperiments requires the Parallel '...
-        'Computing toolbox. Reverting to serial evaluation.'])
-    opts.ParallelizeExperiments = false;
-end
-
 % Disable experiment parallelization if global optimization is desired
 if opts.GlobalOptimization && opts.ParallelizeExperiments
     warning('KroneckerBio:FitObjective:GlobalOptimizationParallelExperimentsNotSupported', ...
@@ -419,95 +410,10 @@ if opts.GlobalOptimization && opts.ParallelizeExperiments
     opts.ParallelizeExperiments = false;
 end
 
-% Initialize a parallel pool, or get the current one.
-% Disable experiment parallelization if no pool can be initialized.
-if opts.ParallelizeExperiments
-    
-    p = gcp();
-    if isempty(p)
-        warning('KroneckerBio:FitObjective:NoParallelPool', ...
-            ['opts.ParallelizeExperiments was set to true, ' ...
-            'but no parallel pool could be initialized. '...
-            'Reverting to serial optimization.']);
-        opts.ParallelizeExperiments = false;
-    else
-        NumWorkers = p.NumWorkers;
-    end
-    
-end
-
-if opts.ParallelizeExperiments
-    % Split experiments into worker groups
-    nCon = numel(con);
-    baseNumPerWorker = floor(nCon/NumWorkers);
-    remainder = nCon - baseNumPerWorker*NumWorkers;
-    numPerWorker = repmat(baseNumPerWorker, NumWorkers, 1);
-    numPerWorker(1:remainder) = numPerWorker(1:remainder) + 1;
-    icon_worker = cell(NumWorkers, 1);
-    endi = 0;
-    for ii = 1:NumWorkers
-        starti = endi+1;
-        endi = sum(numPerWorker(1:ii));
-        icon_worker{ii} = (starti:endi)';
-    end
-    
-    % Determine which parameters are fit by which experiments
-    T_experiment = zeros(nT, 1);
-    T_experiment(1:nTk) = 0;
-    nTs_con = sum(opts.UseSeeds,1);
-    nTq_con = cellfun(@sum, opts.UseInputControls(:)');
-    nTh_con = cellfun(@sum, opts.UseDoseControls(:)');
-    nT_con = {nTs_con, nTq_con, nTh_con};
-    endi = nTk;
-    for i_type = 1:3
-        for j_con = 1:nCon
-            starti = endi + 1;
-            endi = endi + nT_con{i_type}(j_con);
-            T_experiment(starti:endi) = j_con;
-        end
-    end
-    
-    % Generate objective function parts for each worker
-    slave_objectives = cell(1,NumWorkers);
-    for ii = 1:NumWorkers
-        slave_objectives{ii} = generateSlaveObjective(m, con, obj, opts, intOpts, T_experiment, icon_worker{ii}, solverFun, solverGrad);
-    end
-    
-    % Distribute slave objective functions to workers
-    spmd
-        slave_objectives = codistributed(slave_objectives);
-    end
-    
-    % Generate constraint function parts for each worker
-    slave_constraints = cell(numel(obj_constraint),NumWorkers);
-    for ii = 1:numel(obj_constraint)
-        for jj = 1:NumWorkers
-            slave_constraints{ii,jj} = generateSlaveObjective(m, con, obj_constraint{ii}, opts, intOpts, T_experiment, icon_worker{jj}, solverFun, solverGrad);
-        end
-    end
-    
-    % Distribute slave constraint functions to workers
-    spmd
-        slave_constraints = codistributed(slave_constraints, codistributor('1d',2));
-    end
-    
-    fminconObjective = @parallelExperimentObjective;
-    if isNonlinearConstraint
-        fminconConstraint = @parallelExperimentConstraint;
-    else
-        fminconConstraint = [];
-    end
-    
-else
-    
-    fminconObjective = @serialObjective;
-    if isNonlinearConstraint
-        fminconConstraint = @serialConstraint;
-    else
-        fminconConstraint = [];
-    end
-    
-end
+% Generate the objective and constraint functions
+% TODO: set up adjoint integration function
+% Fix global optimization (currently untested)
+[objective,constraint] = GenerateObjective(m, con, obj, opts);
 
 for iRestart = 1:opts.Restart+1
     % Init abort parameters
@@ -520,7 +426,7 @@ for iRestart = 1:opts.Restart+1
         
         % Create local optimization problem
         %   Used as a subset/refinement of global optimization
-        localProblem = createOptimProblem('fmincon', 'objective', fminconObjective, ...
+        localProblem = createOptimProblem('fmincon', 'objective', objective, ...
             'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
             'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
             'options', localOpts);
@@ -539,21 +445,21 @@ for iRestart = 1:opts.Restart+1
                 [That, G, exitflag] = run(ms, localProblem, globalOpts.nStartPoints);
             case 'patternsearch'
                 psOpts = psoptimset('MaxIter', globalOpts.MaxIter, 'UseParallel', globalOpts.UseParallel);
-                [That, G, exitflag] = patternsearch(fminconObjective, That, [], [], ...
+                [That, G, exitflag] = patternsearch(objective, That, [], [], ...
                     opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, [], psOpts);
             otherwise
                 error('KroneckerBio:FitObjective:InvalidGlobalOptAlgorithm', 'Global optimization algorithm %s not recognized.', globalOpts.Algorithm)
         end
         
-        [~, D] = fminconObjective(That); % since global solvers don't return gradient at endpoint
+        [~, D] = objective(That); % since global solvers don't return gradient at endpoint
         
     else
         if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
         switch opts.Solver
             case 'fmincon'
-                [That, G, exitflag, ~, ~, D] = fmincon(fminconObjective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, fminconConstraint, localOpts);
+                [That, G, exitflag, ~, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
             case 'lsqnonlin'
-                [That,G,~,exitflag,~,~,D] = lsqnonlin(fminconObjective, That, opts.LowerBound, opts.UpperBound, localOpts);
+                [That,G,~,exitflag,~,~,D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
             otherwise
                 error('KroneckerBio:FitObjective:UnrecognizedSolver', ...
                     'Unrecognized solver %s', opts.Solver);
@@ -564,7 +470,7 @@ for iRestart = 1:opts.Restart+1
     % Abortion values are not returned by fmincon and must be retrieved
     if aborted
         That = Tabort;
-        [G, D] = fminconObjective(That);
+        [G, D] = objective(That);
     end
     
     % Re-apply stiff bounds
@@ -635,347 +541,6 @@ end
         if ~isempty(opts.OutputFcn)
             stop = stop || providedOutputFcn(x, optimValues, state);
         end
-    end
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Serial objective function %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    function [G, D] = serialObjective(T)
-        % Reset answers
-        G = 0;
-        D = zeros(nT,1);
-        if strcmp(opts.Algorithm, 'sqp') && any(abs(T - lastT) > opts.MaxStepSize)
-            % Don't allow steps larger than the max step size
-            G = nan;
-            if nargout > 1
-                D = nan(nT,1);
-            end
-            return
-        end
-        
-        % Unnormalize
-        if opts.Normalized
-            T = exp(T);
-        else
-            % If fmincon chooses values that violate the lower bounds, force them to be equal to the lower bounds
-            T(T < opts.LowerBound) = opts.LowerBound(T < opts.LowerBound);
-        end
-        
-        % Update parameter sets
-        [m, con] = updateAll(m, con, T, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-        
-        % Integrate system to get objective function value
-        if nargout < 2
-            try
-                G = solverFun(m, con, obj, intOpts);
-            catch ME
-                % If an integration error, return a NaN objective function
-                % value
-                switch ME.identifier
-                    case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                        G = nan;
-                    otherwise
-                        rethrow(ME)
-                end
-            end
-        end
-        
-        % Integrate sensitivities or use adjoint to get objective gradient
-        if nargout == 2
-            try
-                [G, D] = solverGrad(m, con, obj, intOpts);
-            catch ME
-                switch ME.identifier
-                    case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                        G = nan;
-                        D = nan(nT,1);
-                    otherwise
-                        rethrow(ME)
-                end
-            end
-        end
-    end
-
-    function [c, ceq, GC, GCeq] = serialConstraint(T)
-%         % Reset answers
-%         c = 0;
-%         GC = zeros(nT,1);
-        if strcmp(opts.Algorithm, 'sqp') && any(abs(T - lastT) > opts.MaxStepSize)
-            % Don't allow steps larger than the max step size
-            c = nan(nConstraints,1);
-            if nargout > 1
-                GC = nan(nT,1);
-            end
-            return
-        end
-        
-        % Unnormalize
-        if opts.Normalized
-            T = exp(T);
-        else
-            % If fmincon chooses values that violate the lower bounds, force them to be equal to the lower bounds
-            T(T < opts.LowerBound) = opts.LowerBound(T < opts.LowerBound);
-        end
-        
-        % Update parameter sets
-        [m, con] = updateAll(m, con, T, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-        
-        % Integrate system to get objective function value
-        c = zeros(nConstraints,1);
-        if nargout < 2
-            for i = 1:nConstraints
-                try
-                    c(i) = solverFun(m, con, obj_constraint{i}, intOpts);
-                catch ME
-                    % If an integration error, return a NaN objective function
-                    % value
-                    switch ME.identifier
-                        case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                            c(i) = nan;
-                        otherwise
-                            rethrow(ME)
-                    end
-                end
-            end
-        end
-        
-        % Integrate sensitivities or use adjoint to get objective gradient
-        if nargout == 2
-            GC = zeros(nT, nConstraints);
-            for i = 1:nConstraints
-                try
-                    [c(i), GC(:,i)] = solverGrad(m, con, obj_constraint{i}, intOpts);
-                catch ME
-                    switch ME.identifier
-                        case 'KroneckerBio:accumulateOde:IntegrationFailure'
-                            c = nan(nConstraints,1);
-                            GC = nan(nConstraints,nT);
-                        otherwise
-                            rethrow(ME)
-                    end
-                end
-            end
-        end
-        
-        c = c(:)-opts.ConstraintVal(:);
-        
-        ceq = [];
-        GCeq = [];
-    end
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Master parallel experiment objective function %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    function [G,D] = parallelExperimentObjective(T)
-        
-        if nargout < 2
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_objectives);
-                G_d = this_slave_objective{1}(T);
-            end
-            
-        else
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_objectives);
-                [G_d, D_d] = this_slave_objective{1}(T);
-            end
-           
-            % Sum slave objective function gradients to get total gradient
-            D = cell(NumWorkers,1);
-            for wi = 1:NumWorkers
-                D{wi} = D_d{wi};
-            end
-            
-            switch opts.Solver
-                case 'fmincon'
-                    D = horzcat(D{:});
-                    D = sum(D,2);
-                case 'lsqnonlin'
-                    D = vertcat(D{:});
-            end
-        end
-        
-        % Sum slave objective function values to get total value
-        G = cell(NumWorkers,1);
-        for wi = 1:NumWorkers
-            G{wi} = G_d{wi};
-        end
-        G = vertcat(G{:});
-        switch opts.Solver
-            case 'fmincon'
-                G = sum(G,1);
-            case 'lsqnonlin'
-                % Don't do anything extra
-        end
-        
-    end
-
-    function [c,ceq,GC,GCeq] = parallelExperimentConstraint(T)
-        
-        if nargout < 2
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_constraints);
-                G_d = zeros(1,nConstraints);
-                for ci = 1:nConstraints
-                    G_d(ci) = this_slave_objective{ci}(T);
-                end
-            end
-            
-        else
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_constraints);
-                G_d = zeros(1,nConstraints);
-                GC_d = zeros(nT, nConstraints);
-                for ci = 1:nConstraints
-                    [G_d(ci), GC_d(:,ci)] = this_slave_objective{ci}(T);
-                end
-            end
-           
-%             % Sum slave objective function gradients to get total gradient
-%             GC = cell(NumWorkers,1);
-%             for wi = 1:NumWorkers
-%                 GC{wi} = GC_d{wi};
-%             end
-            
-            
-            switch opts.Solver
-                case 'fmincon'
-                    GC = zeros(nT, nConstraints);
-                    for wi = 1:NumWorkers
-                        GC = GC + GC_d{wi};
-                    end
-                case 'lsqnonlin'
-                    error('lsqnonlin should have no nonlinear constraints!')
-                    GC = vertcat(GC{:});
-            end
-            
-        end
-        
-        % Sum slave objective function values to get total value
-        c = cell(NumWorkers,1);
-        for wi = 1:NumWorkers
-            c{wi} = G_d{wi};
-        end
-        c = vertcat(c{:});
-        switch opts.Solver
-            case 'fmincon'
-                c = sum(c,1);
-            case 'lsqnonlin'
-                error('lsqnonlin should have no nonlinear constraints!')
-                % Don't do anything extra
-        end
-        
-        c = c(:) - opts.ConstraintVal(:);
-        
-        ceq = [];
-        GCeq = [];
-    end
-end
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Slave objective function generator %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-function objectivefun = generateSlaveObjective(m, con, obj, opts, intOpts, T_experiment, i_cons, solverFun, solverGrad)
-% T_experiment:
-%   nT-by-1 vector of experiment indices indicating which experiment fits
-%   each parameter. 0 indicates model parameter fit by all experiments.
-% i_cons:
-%   Vector of experimental indices to be simulated by the slave function.
-
-    nT = numel(T_experiment);
-    
-    % If worker has no experiments assigned, assign a 0-valued objective
-    % function to it
-    if isempty(i_cons)
-        % Clear variables to avoid wasting memory in closure
-        clear m con obj opts intOpts T_experiment
-        
-        objectivefun = @emptyobjective;
-        
-        return
-    end
-
-    % Get information on which parameters need to be used for the worker's
-    % experiments
-    TisWorker = T_experiment == 0 | any(bsxfun(@eq, T_experiment, i_cons(:)'), 2);
-
-    % Filter down input arguments to those relevant to the worker
-    con = con(i_cons);
-    obj = obj(:, i_cons);
-    opts.UseSeeds = opts.UseSeeds(:,i_cons);
-    opts.UseInputControls = opts.UseInputControls(i_cons);
-    opts.UseDoseControls = opts.UseDoseControls(i_cons);
-    opts.ObjWeights = opts.ObjWeights(:,i_cons);
-    if iscell(opts.AbsTol)
-        opts.AbsTol = opts.AbsTol(i_cons);
-    end
-    opts.LowerBound = opts.LowerBound(TisWorker);
-    opts.UpperBound = opts.UpperBound(TisWorker);
-    intOpts.UseSeeds = intOpts.UseSeeds(:,i_cons);
-    intOpts.UseInputControls = intOpts.UseInputControls(i_cons);
-    intOpts.UseDoseControls = intOpts.UseDoseControls(i_cons);
-    intOpts.ObjWeights = intOpts.ObjWeights(:,i_cons);
-    if iscell(intOpts.AbsTol)
-        intOpts.AbsTol = intOpts.AbsTol(i_cons);
-    end
-    intOpts.LowerBound = intOpts.LowerBound(TisWorker);
-    intOpts.UpperBound = intOpts.UpperBound(TisWorker);
-    
-    % Return worker-specific objective function
-    objectivefun = @objective;
-
-    function [G, D] = objective(T)
-    % Slave objective function
-        
-        % Get portion of T that is relevant to the worker
-        T_worker = T(TisWorker);
-        
-        % Reset answers
-        G = 0;
-        D_worker = zeros(numel(T_worker),1);
-        
-        % Unnormalize
-        if opts.Normalized
-            T_worker = exp(T_worker);
-        else
-            % If fmincon chooses values that violate the lower bounds, force them to be equal to the lower bounds
-            T_worker(T_worker < opts.LowerBound) = opts.LowerBound(T_worker < opts.LowerBound);
-        end
-        
-        % Update parameter sets
-        [m, con] = updateAll(m, con, T_worker, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-        
-        % Integrate system to get objective function value
-        if nargout <= 1
-            G = solverFun(m, con, obj, intOpts);
-        end
-        
-        % Integrate sensitivities or use adjoint to get objective gradient
-        if nargout == 2
-            [G, D_worker] = solverGrad(m, con, obj, intOpts);
-        end
-        
-        % Assign back to vector sized for all workers
-        switch opts.Solver
-            case 'fmincon'
-                D = zeros(nT, 1);
-                D(TisWorker) = D_worker;
-            case 'lsqnonlin'
-                D = zeros(size(D_worker,1), nT);
-                D(:,TisWorker) = D_worker;
-        end
-    end
-
-    function [G, D] = emptyobjective(T)
-        % Function to use if worker has no experiments assigned to it
-        G = 0;
-        D = zeros(nT, 1);
     end
 
 end
