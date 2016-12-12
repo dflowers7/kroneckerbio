@@ -282,10 +282,12 @@ end
             int_i = integr(T, integrateFunctions_constraint{i}{fun_i});
             [out_i{:}] = constraintFunctions{i}(constr_obj{i}, int_i);
             for j = 1:nargout
-                if j <= 2
-                    varargout{j}(i) = out_i{j} - constr_vals(i);
-                else
-                    varargout{j}(:,i) = out_i{j};
+                if ~isempty(out_i{j})
+                    if j <= 2
+                        varargout{j}(i,1) = out_i{j} - constr_vals(i);
+                    else
+                        varargout{j}(:,i) = out_i{j};
+                    end
                 end
             end
         end

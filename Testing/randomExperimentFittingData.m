@@ -1,4 +1,4 @@
-function [obj, opts, mVariant, conVariant, obj_c] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints)
+function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints)
 % Generate random experiments for testing objective-based Kronecker
 % functions with multiple experiments
 % 
@@ -170,25 +170,29 @@ end
 % Determine random time points, experiments, and outputs for the constraint
 % functions
 obj_c = objectiveZero(0);
-for i = 1:nConstraints
-    timelist_c = tF*rand(nConstraints, 1);
-    outputlist_c = randi(m.ny, nConstraints, 1);
-    experimentlist_c = randi(nExperiments, nConstraints, 1);
+for i = nConstraints:-1:1
+    timelist_c = tF*rand(1, 1);
+    outputlist_c = randi(m.ny, 1, 1);
+    experimentlist_c = randi(nExperiments, 1, 1);
     
     sd_c = sdLinear(0.1, 0.01);
     
     % Get observations
     for ei = nExperiments:-1:1
         isExperiment = experimentlist_c == ei;
-        obs_c(ei) = observationLinearWeightedSumOfSquares(...
-            outputlist_c(isExperiment),...
-            timelist_c(isExperiment),...
-            sd_c,...
-            sprintf('Experiment %d constraint', ei));
+        if any(isExperiment)
+            obs_c(ei) = observationLinearWeightedSumOfSquares(...
+                outputlist_c(isExperiment),...
+                timelist_c(isExperiment),...
+                sd_c,...
+                sprintf('Experiment %d constraint', ei));
+        else
+            obs_c(ei) = observationZero(1);
+        end
     end
     
     % Simulate new experiments to get constraint values
-    sim = SimulateSystem(mVariant, conVariant, obs, opts);
+    sim = SimulateSystem(mVariant, conVariant, obs_c, opts);
     measurements = {sim.measurements};
     
     % Create objective functions for constraints
@@ -198,6 +202,10 @@ for i = 1:nConstraints
         % reasonably met
         obj_c(ei,ei) = obs_c(ei).Objective(measurements{ei}*1.3);
     end
+    
+    % Add objective functions to opts
+    opts.ConstraintObj{i} = obj_c;
+    opts.ConstraintVal(i) = chi2inv(0.95, 1);
 end
 
 end

@@ -55,7 +55,7 @@ function testSimpleParallelFitting(a)
 fitopts.MaxIter = 2;
 nExperiments = 3;
 nTotalTimePoints = 15;
-testfun = generateTestParallel('simple', fitopts, nExperiments, nTotalTimePoints);
+testfun = generateTestParallel('simple', fitopts, nExperiments, nTotalTimePoints, 0);
 testfun(a)
 
 end
@@ -65,14 +65,25 @@ function testMichaelisMentenParallelFitting(a)
 fitopts.MaxIter = 2;
 nExperiments = 3;
 nTotalTimePoints = 15;
-testfun = generateTestParallel('michaelis_menten', fitopts, nExperiments, nTotalTimePoints);
+testfun = generateTestParallel('michaelis_menten', fitopts, nExperiments, nTotalTimePoints, 0);
+testfun(a)
+
+end
+
+function testSimpleParallelFittingWithConstraints(a)
+
+fitopts.MaxIter = 2;
+nExperiments = 3;
+nTotalTimePoints = 15;
+nConstraints = 4;
+testfun = generateTestParallel('simple', fitopts, nExperiments, nTotalTimePoints, nConstraints);
 testfun(a)
 
 end
 
 %% Test generation function for parallel tests
 
-function testfun = generateTestParallel(model, fitopts, nExperiments, nTotalTimePoints)
+function testfun = generateTestParallel(model, fitopts, nExperiments, nTotalTimePoints, nConstraints)
 
 % Check for parallel toolbox. If missing, just skip this test
 noParallelToolbox = isempty(ver('distcomp'));
@@ -93,7 +104,7 @@ end
 % Get randomized experiments and their fitting data
 tF = obj.tF;
 [obj, opts] = randomExperimentFittingData(m, con, opts, tF,...
-    nExperiments, nTotalTimePoints);
+    nExperiments, nTotalTimePoints, nConstraints);
 
 opts = mergestruct(opts, fitopts);
 opts.ParallelizeExperiments = true;
