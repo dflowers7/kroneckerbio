@@ -1,4 +1,12 @@
-function [m, con, obj, opts] = simple_analytic_model()
+function [m, con, obj, opts] = simple_analytic_model(sdHasYDependency)
+
+if nargin < 1
+    sdHasYDependency = [];
+end
+
+if isempty(sdHasYDependency)
+    sdHasYDependency = true;
+end
 
 m = LoadModelSbmlAnalytic('simple_analytic.xml');
 
@@ -22,7 +30,11 @@ values = [
     7, 30,  25
     ];
 
-sd = sdLinear(0.5, 0.1);
+if sdHasYDependency
+    sd = sdLinear(0.5, 0.1);
+else
+    sd = sdLinear(0.5, 0);
+end
 obs = observationLinearWeightedSumOfSquares(values(:,1), values(:,2), sd);
 obj = obs.Objective(values(:,3));
 

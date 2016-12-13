@@ -138,7 +138,7 @@ if opts.ParallelizeExperiments
 end
 
 % Set up variables for memoization
-[lastT,lastint] = deal(struct('integrateAllSys', {[]}, 'integrateAllSens', {[]}));
+[lastT,lastint] = deal(struct('integrateAllSys', {[]}, 'integrateAllSens', {[]}, 'integrateAllCurvVecProd', {[]}));
 
 displayedMemoWarning = false;
 
@@ -150,32 +150,68 @@ else
     constrfun = [];
 end
 
-    function int = integr(T, integrateFunction)
+    function int = integr(T, integrateFunctions)
         
-        int_temp = get_memoized_int(T, integrateFunction);
-        if ~isempty(int_temp)
-            int = int_temp;
-            return
-        end
+        nIntegrates = sum(~cellfun(@isempty,integrateFunctions));
         
-        if opts.ParallelizeExperiments
-            spmd
+        prevint = [];
+        
+        for j = 1:nIntegrates
+            
+            int_temp = get_memoized_int(T, integrateFunctions{j});
+            if ~isempty(int_temp)
+                int = int_temp;
+                prevint = int;
+                continue
+            end
+            
+            if opts.ParallelizeExperiments
+                spmd
+                    % Get local experiments
+                    con_i = getLocalPart(cons);
+                    con_i = con_i{1};
+                    obj_i = getLocalPart(objs);
+                    obj_i = obj_i{1};
+                    opts_i = getLocalPart(optss);
+                    opts_i = opts_i{1};
+                    TisWorker_i = getLocalPart(TisWorker);
+                    TisWorker_i = TisWorker_i{1};
+                    
+                    if isempty(con_i)
+                        ints = [];
+                    else
+                        % Update model and experiments with provided parameters
+                        [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
+                        
+                        % Integrate the system
+                        ncon_i = numel(con_i);
+                        for i = ncon_i:-1:1
+                            opts_ii = opts_i;
+                            opts_ii.AbsTol = opts_ii.AbsTol{i};
+                            opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
+                            opts_ii.UseInputControls = opts_ii.UseInputControls{i};
+                            opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
+                            if j == 1
+                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii);
+                            else
+                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii, obj, prevint);
+                            end
+                        end
+                    end
+                end
+            else
                 % Get local experiments
-                con_i = getLocalPart(cons);
-                con_i = con_i{1};
-                obj_i = getLocalPart(objs);
-                obj_i = obj_i{1};
-                opts_i = getLocalPart(optss);
-                opts_i = opts_i{1};
-                TisWorker_i = getLocalPart(TisWorker);
-                TisWorker_i = TisWorker_i{1};
-
+                con_i = cons{1};
+                obj_i = objs{1};
+                opts_i = optss{1};
+                TisWorker_i = TisWorker{1};
+                
                 if isempty(con_i)
                     ints = [];
                 else
                     % Update model and experiments with provided parameters
                     [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
-
+                    
                     % Integrate the system
                     ncon_i = numel(con_i);
                     for i = ncon_i:-1:1
@@ -184,57 +220,43 @@ end
                         opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
                         opts_ii.UseInputControls = opts_ii.UseInputControls{i};
                         opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
-                        ints(:,i) = integrateFunction(m_i, con_i(i), obj_i(:,i), opts_ii);
+                        if j == 1
+                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii);
+                        else
+                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii, obj, prevint);
+                        end
                     end
                 end
-            end
-        else
-            % Get local experiments
-            con_i = cons{1};
-            obj_i = objs{1};
-            opts_i = optss{1};
-            TisWorker_i = TisWorker{1};
-            
-            if isempty(con_i)
-                ints = [];
-            else
-                % Update model and experiments with provided parameters
-                [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
                 
-                % Integrate the system
-                ncon_i = numel(con_i);
-                for i = ncon_i:-1:1
-                    opts_ii = opts_i;
-                    opts_ii.AbsTol = opts_ii.AbsTol{i};
-                    opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
-                    opts_ii.UseInputControls = opts_ii.UseInputControls{i};
-                    opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
-                    ints(:,i) = integrateFunction(m_i, con_i(i), obj_i(:,i), opts_ii);
+                ints = {ints};
+            end
+            
+            clear int; % Prevents "subscripted assignment between dissimilar structures" error
+            
+            % Combine the workers' int structs by concatenating horizontally
+            for i = NumWorkers:-1:1
+                ints_temp = ints{i};
+                if ~isempty(ints_temp)
+                    int(:,icon_worker{i}) = ints_temp;
                 end
             end
             
-            ints = {ints};
-        end
-        
-        % Combine the workers' int structs by concatenating horizontally
-        for i = NumWorkers:-1:1
-            ints_temp = ints{i};
-            if ~isempty(ints_temp)
-                int(:,icon_worker{i}) = ints_temp;
+            clear ints; % Prevents "subscripted assignment between dissimilar structures" error
+            
+            % Add other fields needed
+            ObjWeights = num2cell(opts.ObjWeights);
+            [int.ObjWeight] = deal(ObjWeights{:});
+            for i = 1:n_con
+                [int(:,i).TisExperiment] = deal(TisExperiment(:,i));
+                [int(:,i).T] = deal(T(TisExperiment(:,i)));
+                [int(:,i).nT] = deal(sum(TisExperiment(:,i)));
             end
+            
+            prevint = int;
+            
         end
         
-        % Add other fields needed
-        [int.T] = deal(T);
-        ObjWeights = num2cell(opts.ObjWeights);
-        [int.ObjWeight] = deal(ObjWeights{:});
-        for j = 1:n_con
-            [int(:,j).TisExperiment] = deal(TisExperiment(:,j));
-            [int(:,j).T] = deal(T(TisExperiment(:,j)));
-            [int(:,j).nT] = deal(sum(TisExperiment(:,j)));
-        end
-        
-        set_memoized_int(int, T, integrateFunction);
+        set_memoized_int(int, T, integrateFunctions{nIntegrates});
         
     end
 
@@ -252,7 +274,7 @@ end
         if fun_i == 0
             fun_i = 1;
         end
-        int = integr(T, integrateFunctions_objective{fun_i});
+        int = integr(T, integrateFunctions_objective(fun_i,:));
         
         varargout = cell(fun_i,1);
         [varargout{:}] = objectiveFunction(obj, int);
@@ -277,11 +299,11 @@ end
         
         nconstraints = numel(integrateFunctions_constraint);
         varargout = cell(fun_i,1);
-        out_i = cell(nargout,1);
+        out_i = cell(fun_i,1);
         for i = nconstraints:-1:1
-            int_i = integr(T, integrateFunctions_constraint{i}{fun_i});
+            int_i = integr(T, integrateFunctions_constraint{i}(fun_i,:));
             [out_i{:}] = constraintFunctions{i}(constr_obj{i}, int_i);
-            for j = 1:nargout
+            for j = 1:fun_i
                 if ~isempty(out_i{j})
                     if j <= 2
                         varargout{j}(i,1) = out_i{j} - constr_vals(i);
@@ -296,20 +318,27 @@ end
 
     function int = get_memoized_int(T, integrateFunction)
         
-        integrateFunction_str = func2str(integrateFunction);
-        if isequal(T, lastT.(integrateFunction_str))
-            switch func2str(integrateFunction)
-                case 'integrateAllSys'
-                    int = lastint.integrateAllSys;
-                case 'integrateAllSens'
-                    int = lastint.integrateAllSens;
-                otherwise
-                    if ~displayedMemoWarning
-                        warning('Unrecognized integration function. Memoization of results will be disabled until GenerateObjective/integr is updated to support this integration function.');
-                        displayedMemoWarning = true;
-                    end
-                    int = [];
-            end
+        switch func2str(integrateFunction)
+            case 'integrateAllSys'
+                lastintval = lastint.integrateAllSys;
+                lastTval = lastT.integrateAllSys;
+            case 'integrateAllSens'
+                lastintval = lastint.integrateAllSens;
+                lastTval = lastT.integrateAllSens;
+            case 'GenerateFIMEigenvalueFunction/integrateAllCurvVecProd'
+                lastintval = lastint.integrateAllCurvVecProd;
+                lastTval = lastT.integrateAllCurvVecProd;
+            otherwise
+                if ~displayedMemoWarning
+                    warning('Unrecognized integration function. Memoization of results will be disabled until GenerateObjective/integr is updated to support this integration function.');
+                    displayedMemoWarning = true;
+                end
+                lastintval = [];
+                lastTval = [];
+        end
+        
+        if isequal(T, lastTval)
+            int = lastintval;
         else
             int = [];
         end
@@ -323,6 +352,13 @@ end
             case 'integrateAllSens'
                 lastint.integrateAllSens = int;
                 lastint.integrateAllSys = int; % Higher-order integration contains all information for lower-order integration
+                lastT.integrateAllSens = T;
+                lastT.integrateAllSys = T;
+            case 'GenerateFIMEigenvalueFunction/integrateAllCurvVecProd'
+                lastint.integrateAllCurvVecProd = int;
+                lastint.integrateAllSens = int;
+                lastint.integrateAllSys = int;
+                lastT.integrateAllCurvVecProd = T;
                 lastT.integrateAllSens = T;
                 lastT.integrateAllSys = T;
         end
