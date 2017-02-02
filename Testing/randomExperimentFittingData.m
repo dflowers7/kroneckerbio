@@ -1,4 +1,4 @@
-function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints)
+function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints, outputsToExclude)
 % Generate random experiments for testing objective-based Kronecker
 % functions with multiple experiments
 % 
@@ -13,14 +13,20 @@ function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con,
 % experiments used to generate the data in mVariant and conVariant,
 % respectively.
 %
+% Provide a vector of output indices in outputsToExclude to exclude them
+% from being chosen to fit.
+%
 % Warning: AbsTol is set to default value of 1e-9 no matter what to avoid
 % dealing with standardization, which is complicated.
 %
 % (c) 2016 David Flowers
 % This work is released under the MIT license.
 
-if nargin < 7
-    nConstraints = [];
+if nargin < 8
+    outputsToExclude = [];
+    if nargin < 7
+        nConstraints = [];
+    end
 end
 
 if isempty(nConstraints)
@@ -141,7 +147,9 @@ end
 % Determine random time points, experiments, and outputs for the objective
 % function
 timelist = tF*rand(nTotalDataPoints, 1);
-outputlist = randi(m.ny, nTotalDataPoints, 1);
+outputlist = randi(m.ny-numel(outputsToExclude), nTotalDataPoints, 1);
+possibleOutputs = setdiff(1:m.ny, outputsToExclude);
+outputlist = possibleOutputs(outputlist);
 experimentlist = randi(nExperiments, nTotalDataPoints, 1);
 
 sd = sdLinear(0.1, 0.01);

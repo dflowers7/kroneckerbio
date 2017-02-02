@@ -294,7 +294,11 @@ for i = 1:n
     y_i = y_all(outputlist(i),ind);
     
     % Compute dy/dT
-    dydT_temp = reshape(dydT_all(:,ind), ny, nT);
+    try
+        dydT_temp = reshape(dydT_all(:,ind), ny, nT);
+    catch ME
+        rethrow(ME)
+    end
     dydT(i,:) = dydT_temp(outputlist(i),:);
     
     % Compute expected V matrix

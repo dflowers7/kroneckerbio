@@ -71,6 +71,41 @@ constr_obj = opts.ConstraintObj;
 constr_vals = opts.ConstraintVal;
 hasconstraint = ~isempty(constr_vals);
 
+% Unify the objective and all the constraints' objectives into one struct
+nIntegrateFunctions_constraint = sum(cellfun(@numel, integrateFunctions_constraint));
+nIntegrateFunctions = numel(integrateFunctions_objective) + nIntegrateFunctions_constraint;
+int_all = struct('index', cell(nIntegrateFunctions,1), ...
+    'isobjective', cell(nIntegrateFunctions,1), 'integratefun', cell(nIntegrateFunctions,1));
+count = 1;
+for ii = 1:size(integrateFunctions_objective,1)
+    for jj = 1:size(integrateFunctions_objective,2)
+        int_all(count).index = 1;
+        int_all(count).isobjective = true;
+        int_all(count).integratefun = func2str(integrateFunctions_objective{ii,jj});
+        count = count + 1;
+    end
+end
+for kk = 1:nconstraints
+    intfuns_kk = integrateFunctions_constraint{kk};
+    for ii = 1:size(intfuns_kk,1)
+        for jj = 1:size(intfuns_kk,2)
+            if isempty(intfuns_kk{ii,jj})
+                continue % Empty placeholder. Skip to next
+            else
+                funcstr = func2str(intfuns_kk{ii,jj});
+            end
+            if ~any(ismember([int_all(1:count-1).index]', kk) & ismember([int_all(1:count-1).isobjective]', false) & ismember({int_all(1:count-1).integratefun}', funcstr))  
+            % Only add unique entries
+                int_all(count).index = kk;
+                int_all(count).isobjective = false;
+                int_all(count).integratefun = funcstr;
+                count = count + 1;
+            end
+        end
+    end
+end
+int_all(count:end) = [];
+
 % Determine which parameters are fit by which experiments
 T_experiment = zeros(nT, 1);
 T_experiment(1:nTk) = 0;
@@ -106,6 +141,7 @@ if opts.ParallelizeExperiments
             'but no parallel pool could be initialized. '...
             'Reverting to serial optimization.']);
         opts.ParallelizeExperiments = false;
+        NumWorkers = 1;
     else
         NumWorkers = p.NumWorkers;
     end
@@ -118,13 +154,13 @@ baseNumPerWorker = floor(n_con/NumWorkers);
 remainder = n_con - baseNumPerWorker*NumWorkers;
 numPerWorker = repmat(baseNumPerWorker, NumWorkers, 1);
 numPerWorker(1:remainder) = numPerWorker(1:remainder) + 1;
-[icon_worker,cons,objs,optss,TisWorker] = deal(cell(NumWorkers, 1));
+[icon_worker,cons,objs,optss,TisWorker,constr_objs] = deal(cell(NumWorkers, 1));
 endi = 0;
 for ii = 1:NumWorkers
     starti = endi+1;
     endi = sum(numPerWorker(1:ii));
     icon_worker{ii} = (starti:endi)';
-    [cons{ii}, objs{ii}, optss{ii}, TisWorker{ii}] = splitExperiments(con, obj, opts, icon_worker{ii}, T_experiment);
+    [cons{ii}, objs{ii}, optss{ii}, TisWorker{ii}, constr_objs{ii}] = splitExperiments(con, obj, opts, icon_worker{ii}, T_experiment, constr_obj);
 end
 
 % Distribute experiments to workers
@@ -134,6 +170,8 @@ if opts.ParallelizeExperiments
         objs = codistributed(objs);
         optss = codistributed(optss);
         TisWorker = codistributed(TisWorker);
+        icon_workers = codistributed(icon_worker);
+        constr_objs = codistributed(constr_objs);
     end
 end
 
@@ -150,19 +188,47 @@ else
     constrfun = [];
 end
 
-    function int = integr(T, integrateFunctions)
+    function int_return = integr(T, integrateFunctions, isobjective_return, index_return)
         
         nIntegrates = sum(~cellfun(@isempty,integrateFunctions));
         
         prevint = [];
+        prevint_filtered = [];
+        prev_obj_all_cell = [];% Initialize to prevent "Analyzing and transferring files to the workers..." message
+        prev_obj_all_cell_filtered = [];
+        prev_index = [];
+        prev_isobjective = [];
         
         for j = 1:nIntegrates
             
+            integrateFunStr_j = func2str(integrateFunctions{j});
+            is_int_all = strcmp({int_all.integratefun}, integrateFunStr_j);
+            isobjective = vertcat(int_all(is_int_all).isobjective);
+            index = vertcat(int_all(is_int_all).index);
+            
             int_temp = get_memoized_int(T, integrateFunctions{j});
             if ~isempty(int_temp)
-                int = int_temp;
-                prevint = int;
+                int_cell = int_temp;
+                prevint = int_cell;
+                prev_obj_all_cell = cell(numel(index),1);
+                prev_obj_all_cell(isobjective) = {obj};
+                prev_obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
+                prev_index = index;
+                prev_isobjective = isobjective;
                 continue
+            end
+            
+            % Filter the previous integration struct to those ints
+            % needed for this round of integration
+            if ~isempty(prevint)
+                intstokeep = zeros(numel(index),1);
+                for q = 1:numel(index)
+                    intstokeep(q) = find(index(q) == prev_index & isobjective(q) == prev_isobjective);
+                end
+                assert(numel(intstokeep) == numel(index), 'KroneckerBio:GenerateObjective:PrevIntNotFound', ...
+                    'Some of the ints needed for the next round of integration were not found. This is a bug.')
+                prevint_filtered = prevint(intstokeep);
+                prev_obj_all_cell_filtered = prev_obj_all_cell(intstokeep);
             end
             
             if opts.ParallelizeExperiments
@@ -172,10 +238,20 @@ end
                     con_i = con_i{1};
                     obj_i = getLocalPart(objs);
                     obj_i = obj_i{1};
+                    constr_obj_i = getLocalPart(constr_objs);
+                    constr_obj_i = constr_obj_i{1};
                     opts_i = getLocalPart(optss);
                     opts_i = opts_i{1};
                     TisWorker_i = getLocalPart(TisWorker);
                     TisWorker_i = TisWorker_i{1};
+                    %icon_worker_i = getLocalPart(icon_workers);
+                    
+                    % Filter down to the objectives matching the requested
+                    % integrate function
+                    obj_all_i_cell = cell(numel(index),1);
+                    obj_all_i_cell(isobjective) = {obj_i};
+                    obj_all_i_cell(~isobjective) = constr_obj_i(index(~isobjective));
+                    obj_all_i = vertcat(obj_all_i_cell{:});
                     
                     if isempty(con_i)
                         ints = [];
@@ -192,9 +268,9 @@ end
                             opts_ii.UseInputControls = opts_ii.UseInputControls{i};
                             opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
                             if j == 1
-                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii);
+                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii);
                             else
-                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii, obj, prevint);
+                                ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii, prev_obj_all_cell_filtered, prevint_filtered);
                             end
                         end
                     end
@@ -203,14 +279,26 @@ end
                 % Get local experiments
                 con_i = cons{1};
                 obj_i = objs{1};
+                constr_obj_i = constr_objs{1};
                 opts_i = optss{1};
                 TisWorker_i = TisWorker{1};
+                
+                % Filter down to the objs matching the requested
+                % integrate function
+                obj_all_i_cell = cell(numel(index),1);
+                obj_all_i_cell(isobjective) = {obj_i};
+                obj_all_i_cell(~isobjective) = constr_obj_i(index(~isobjective));
+                obj_all_i = vertcat(obj_all_i_cell{:});
                 
                 if isempty(con_i)
                     ints = [];
                 else
                     % Update model and experiments with provided parameters
                     [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
+                    
+                    % Filter down previous int struct to those applicable to this integration
+                    if ~isempty(prevint)
+                    end
                     
                     % Integrate the system
                     ncon_i = numel(con_i);
@@ -221,9 +309,9 @@ end
                         opts_ii.UseInputControls = opts_ii.UseInputControls{i};
                         opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
                         if j == 1
-                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii);
+                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii);
                         else
-                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_i(:,i), opts_ii, obj, prevint);
+                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii, prev_obj_all_cell_filtered, prevint_filtered);
                         end
                     end
                 end
@@ -243,20 +331,42 @@ end
             
             clear ints; % Prevents "subscripted assignment between dissimilar structures" error
             
+            % Separate int array into cells representing the objective and
+            % different constraints
+            obj_all_cell = cell(numel(index),1);
+            obj_all_cell(isobjective) = {obj};
+            obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
+            int_cell = mat2cell(int, cellfun(@(x)size(x,1), obj_all_cell), n_con);
+            
             % Add other fields needed
             ObjWeights = num2cell(opts.ObjWeights);
-            [int.ObjWeight] = deal(ObjWeights{:});
+            if any(isobjective)
+                [int_cell{isobjective}.ObjWeight] = deal(ObjWeights{:});
+            end
             for i = 1:n_con
-                [int(:,i).TisExperiment] = deal(TisExperiment(:,i));
-                [int(:,i).T] = deal(T(TisExperiment(:,i)));
-                [int(:,i).nT] = deal(sum(TisExperiment(:,i)));
+                for k = 1:size(int_cell,1)
+                    [int_cell{k}(:,i).TisExperiment] = deal(TisExperiment(:,i));
+                    [int_cell{k}(:,i).T] = deal(T(TisExperiment(:,i)));
+                    [int_cell{k}(:,i).nT] = deal(sum(TisExperiment(:,i)));
+                    [int_cell{k}.ObjWeight] = deal(1); % Use weights of 1 for constraints. No support for varying ObjWeights for constraints at this point.
+                end
             end
             
-            prevint = int;
+            prevint = int_cell;
+            prev_obj_all_cell = obj_all_cell;
+            prev_index = index;
+            prev_isobjective = isobjective;
+            
+            set_memoized_int(int_cell, T, integrateFunctions{j});
             
         end
         
-        set_memoized_int(int, T, integrateFunctions{nIntegrates});
+        % Return only the requested objective or constraint's int struct
+        if isobjective_return
+            int_return = int_cell{isobjective};
+        else
+            int_return = int_cell{~isobjective & index == index_return};
+        end
         
     end
 
@@ -270,11 +380,14 @@ end
             T(T < opts.LowerBound) = opts.LowerBound(T < opts.LowerBound);
         end
         
+        % Get the int struct for all the obj structs (objective and all
+        % constraints)
         fun_i = nargout;
         if fun_i == 0
             fun_i = 1;
         end
-        int = integr(T, integrateFunctions_objective(fun_i,:));
+        isobjective = true;
+        int = integr(T, integrateFunctions_objective(fun_i,:), isobjective, 1);
         
         varargout = cell(fun_i,1);
         [varargout{:}] = objectiveFunction(obj, int);
@@ -300,8 +413,10 @@ end
         nconstraints = numel(integrateFunctions_constraint);
         varargout = cell(fun_i,1);
         out_i = cell(fun_i,1);
+        isobjective = false;
         for i = nconstraints:-1:1
-            int_i = integr(T, integrateFunctions_constraint{i}(fun_i,:));
+            index = i;
+            int_i = integr(T, integrateFunctions_constraint{i}(fun_i,:), isobjective, index);
             [out_i{:}] = constraintFunctions{i}(constr_obj{i}, int_i);
             for j = 1:fun_i
                 if ~isempty(out_i{j})
@@ -366,7 +481,7 @@ end
 
 end
 
-function [con,obj,opts,TisWorker] = splitExperiments(con, obj, opts, i_cons, T_experiment)
+function [con,obj,opts,TisWorker,constr_obj] = splitExperiments(con, obj, opts, i_cons, T_experiment, constr_obj)
 % T_experiment:
 %   nT-by-1 vector of experiment indices indicating which experiment fits
 %   each parameter. 0 indicates model parameter fit by all experiments.
@@ -402,6 +517,9 @@ function [con,obj,opts,TisWorker] = splitExperiments(con, obj, opts, i_cons, T_e
     end
     opts.LowerBound = opts.LowerBound(TisWorker);
     opts.UpperBound = opts.UpperBound(TisWorker);
+    for i = 1:numel(constr_obj)
+        constr_obj{i} = constr_obj{i}(:,i_cons);
+    end
 %     intOpts.UseSeeds = intOpts.UseSeeds(:,i_cons);
 %     intOpts.UseInputControls = intOpts.UseInputControls(i_cons);
 %     intOpts.UseDoseControls = intOpts.UseDoseControls(i_cons);

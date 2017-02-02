@@ -22,7 +22,7 @@ for i_con = 1:n_con
         err_cell{i_obj,i_con} = obj(i_obj,i_con).err(ints(i_obj,i_con));
         
         if nargout > 1
-            derrdT_i = obj.derrdT(ints(i_obj,i_con));
+            derrdT_i = obj(i_obj,i_con).derrdT(ints(i_obj,i_con));
             if ints(i_obj,i_con).Normalized
                 derrdT_i = bsxfun(@times, derrdT_i, ints(i_obj,i_con).T(:).');
             end

@@ -211,8 +211,17 @@ end
 
 % Apply bounds to starting parameters before optimizing
 % fmincon will choose a wierd value if a starting parameter is outside the bounds
-T0(T0 < opts.LowerBound) = opts.LowerBound(T0 < opts.LowerBound);
-T0(T0 > opts.UpperBound) = opts.UpperBound(T0 > opts.UpperBound);
+belowLowerBounds = T0 < opts.LowerBound;
+if any(belowLowerBounds)
+    warning('Parameter %g was below its lower bound. Resetting it to its lower bound...', find(belowLowerBounds))
+end
+T0(belowLowerBounds) = opts.LowerBound(belowLowerBounds);
+
+aboveUpperBounds = T0 > opts.UpperBound;
+if any(aboveUpperBounds)
+    warning('Parameter %g is above its upper bound. Resetting it to its upper bound...', find(aboveUpperBounds))
+end
+T0(aboveUpperBounds) = opts.UpperBound(aboveUpperBounds);
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%% Halt optimization on terminal goal %%%%%

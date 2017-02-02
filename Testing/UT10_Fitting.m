@@ -71,12 +71,18 @@ testfun(a)
 end
 
 function testSimpleParallelFittingWithConstraints(a)
+% Checks that constrained optimization runs with and without
+% parallelization and gives the same result in each case. Doesn't really
+% check for correctness. Also, I haven't been careful to ensure the
+% randomly generated optimization problem is solvable. There is room for
+% improvement in this test.
 
 fitopts.MaxIter = 2;
 nExperiments = 3;
 nTotalTimePoints = 15;
-nConstraints = 4;
-testfun = generateTestParallel('simple', fitopts, nExperiments, nTotalTimePoints, nConstraints);
+nConstraints = 2;
+pump_yi = 4;
+testfun = generateTestParallel('simple', fitopts, nExperiments, nTotalTimePoints, nConstraints, pump_yi);
 testfun(a)
 
 end
@@ -120,7 +126,11 @@ end
 
 %% Test generation function for parallel tests
 
-function testfun = generateTestParallel(model, fitopts, nExperiments, nTotalTimePoints, nConstraints)
+function testfun = generateTestParallel(model, fitopts, nExperiments, nTotalTimePoints, nConstraints, outputsToExclude)
+
+if nargin < 6
+    outputsToExclude = [];
+end
 
 % Check for parallel toolbox. If missing, just skip this test
 noParallelToolbox = isempty(ver('distcomp'));
