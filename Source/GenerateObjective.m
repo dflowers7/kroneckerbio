@@ -1,13 +1,32 @@
-function [objfun, constrfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions)
+function [objfun, constrfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions, funopts)
+% Input arguments:
+%   m
+%   con
+%   obj
+%   opts
+%   integrateFunctions_objective
+%   objectiveFunction
+%   integrateFunctions_constraint
+%   constraintFunctions
+%   funopts
+%       .ScaleConstraints
+%           Scales constraints by dividing by the constraint value such that all
+%           constraints will be of the form 
+%               f(T)/abs(constraint_value) <= sign(constraint_value) 
+%           instead of 
+%               f(T) <= constraint_value.
 
-if nargin < 8
-    constraintFunctions = [];
-    if nargin < 7
-        integrateFunctions_constraint = [];
-        if nargin < 6
-            objectiveFunction = [];
-            if nargin < 5
-                integrateFunctions_objective = [];
+if nargin < 9
+    funopts = [];
+    if nargin < 8
+        constraintFunctions = [];
+        if nargin < 7
+            integrateFunctions_constraint = [];
+            if nargin < 6
+                objectiveFunction = [];
+                if nargin < 5
+                    integrateFunctions_objective = [];
+                end
             end
         end
     end
@@ -42,6 +61,19 @@ if isempty(constraintFunctions)
             constraintFunctions = cell(0,1);
     end
 end
+
+% Set default options for objective and constraint functions
+if isempty(funopts)
+    funopts = struct;
+end
+defaultFunOpts.ScaleConstraints = false;
+funopts = mergestruct(defaultFunOpts, funopts);
+
+% Extract and check funopts fields
+ScaleConstraints = funopts.ScaleConstraints;
+assert(islogical(ScaleConstraints) && isscalar(ScaleConstraints), ...
+    'KroneckerBio:GenerateObjective:ScaleConstraints', ...
+    'ScaleConstraints must be a logical scalar.')
 
 assert(~strcmp(opts.Solver,'lsqnonlin') || nconstraints == 0, ...
     'KroneckerBio:GenerateObjective:NonlinearConstraintWithLsqnonlin', ...
@@ -190,6 +222,12 @@ end
 
     function int_return = integr(T, integrateFunctions, isobjective_return, index_return)
         
+        timeIntegration = false; % Set to true to time what fraction of the time is spent integrating versus overhead
+        
+        if timeIntegration
+            tottimer = tic;
+        end
+        
         nIntegrates = sum(~cellfun(@isempty,integrateFunctions));
         
         prevint = [];
@@ -233,6 +271,10 @@ end
             
             if opts.ParallelizeExperiments
                 spmd
+                    if timeIntegration
+                        inttime_workers = 0;
+                    end
+                    
                     % Get local experiments
                     con_i = getLocalPart(cons);
                     con_i = con_i{1};
@@ -267,10 +309,16 @@ end
                             opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
                             opts_ii.UseInputControls = opts_ii.UseInputControls{i};
                             opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
+                            if timeIntegration
+                                inttimer = tic;
+                            end
                             if j == 1
                                 ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii);
                             else
                                 ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii, prev_obj_all_cell_filtered, prevint_filtered);
+                            end
+                            if timeIntegration
+                                inttime_workers = inttime_workers + toc(inttimer);
                             end
                         end
                     end
@@ -368,6 +416,15 @@ end
             int_return = int_cell{~isobjective & index == index_return};
         end
         
+        if timeIntegration
+            tottime = toc(tottimer);
+            inttime = 0;
+            for i = 1:NumWorkers
+                inttime = inttime + inttime_workers{i};
+            end
+            fprintf('Integration functions took %g percent of the total time\n', inttime./tottime*100)
+        end
+        
     end
 
     function varargout = objective(T)
@@ -421,9 +478,17 @@ end
             for j = 1:fun_i
                 if ~isempty(out_i{j})
                     if j <= 2
-                        varargout{j}(i,1) = out_i{j} - constr_vals(i);
+                        if ScaleConstraints
+                            varargout{j}(i,1) = out_i{j}./abs(constr_vals(i)) - sign(constr_vals(i));
+                        else
+                            varargout{j}(i,1) = out_i{j} - constr_vals(i);
+                        end
                     else
-                        varargout{j}(:,i) = out_i{j};
+                        if ScaleConstraints
+                            varargout{j}(:,i) = out_i{j}./abs(constr_vals(i));
+                        else
+                            varargout{j}(:,i) = out_i{j};
+                        end
                     end
                 end
             end

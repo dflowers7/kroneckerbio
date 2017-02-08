@@ -7,6 +7,12 @@ n_obs = numel(obs);
 nes = vec([obs.ne]);
 n_eve = sum(nes);
 
+iszeroobs = strcmp({obs.Type}, 'Objective.Data.Zero');
+obslist_i = find(~iszeroobs);
+obsnonzero = obs(obslist_i);
+n_nonzeroobs = numel(obslist_i);
+nes_nonzeroobs = vec([obsnonzero.ne]);
+
 tF = max([obs.tF]);
 eve = @events_combined;
 fin = @is_finished_combined;
@@ -23,11 +29,14 @@ t_get = unique([obs.DiscreteTimes]);
         y_t = y(t,x,u_t);
         
         i_eve = 0;
-        for iobs = 1:n_obs
+        
+        % To avoid significant overhead of evaluating obs.Events, only
+        % calculate on objectives that are non-zero
+        for iobsnonzero = 1:n_nonzeroobs
             i_start = i_eve + 1;
-            i_end = i_eve + nes(iobs);
+            i_end = i_eve + nes_nonzeroobs(iobsnonzero);
             i_int = i_start:i_end;
-            [val(i_int), is_terminal(i_int), direction(i_int)] = obs(iobs).Events(t,y_t);
+            [val(i_int), is_terminal(i_int), direction(i_int)] = obsnonzero(iobsnonzero).Events(t,y_t);
         end
     end
 

@@ -1,4 +1,4 @@
-function [m,con,obj,opts,localOpts,nT,T0] = FixFitObjectiveOpts(m, con, obj, opts)
+function [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts)
 
 % Default options
 defaultOpts.Verbose          = 1;
@@ -45,6 +45,7 @@ defaultOpts.IntegrateFunction               = [];
 defaultOpts.ObjectiveReductionFunction      = [];
 defaultOpts.ConstraintIntegrateFunction     = [];
 defaultOpts.ConstraintReductionFunction     = [];
+defaultOpts.ScaleConstraints                = [];
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
@@ -222,6 +223,8 @@ if any(aboveUpperBounds)
     warning('Parameter %g is above its upper bound. Resetting it to its upper bound...', find(aboveUpperBounds))
 end
 T0(aboveUpperBounds) = opts.UpperBound(aboveUpperBounds);
+
+funopts.ScaleConstraints = opts.ScaleConstraints;
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%% Halt optimization on terminal goal %%%%%

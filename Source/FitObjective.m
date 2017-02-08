@@ -174,7 +174,7 @@ end
 
 assert(isscalar(m), 'KroneckerBio:FitObjective:MoreThanOneModel', 'The model structure must be scalar')
 
-[m,con,obj,opts,localOpts,nT,T0] = FixFitObjectiveOpts(m, con, obj, opts);
+[m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts);
 
 %% Global optimization options
 % TODO: make sure options are relevant for solver
@@ -193,7 +193,8 @@ end
 % Fix global optimization (currently untested)
 [objective,constraint] = GenerateObjective(m, con, obj, opts, ...
     opts.IntegrateFunction, opts.ObjectiveReductionFunction, ...
-    opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction);
+    opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction, ...
+    funopts);
 
 %% Abort in rare case of no optimization
 if numel(T0) == 0
