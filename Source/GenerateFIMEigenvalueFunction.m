@@ -1,4 +1,17 @@
-function [intfun,objfun] = GenerateFIMEigenvalueFunction(eigindex, isconstraint)
+function [intfun,objfun] = GenerateFIMEigenvalueFunction(eigindex, isconstraint, scalebyresidual)
+% [intfun,objfun] = GenerateFIMEigenvalueFunction(eigindex, isconstraint)
+% Returns integration and objective reduction functions for calculating the
+% -log(eigenvalue) of the FIM for an objective function.
+% Output arguments
+%   intfun
+%       If isconstraint is set to false, a cell array of function handles
+%       to integrate functions used for different numbers of output
+%       arguments to the objective function. One output argument is the
+%       zeroth order derivative; two output arguments is the first order
+%       derivative.
+%   objfun
+%       If isconstraint is set to false, function handle to the objective
+%       reduction function.
 % WARNING: Currently there is a flaw in the design that does not allow
 % multiple eigenvalue functions to be used in the same optimization with different
 % eigenvalue indices. The cause is that the memoization scheme depends on
@@ -102,13 +115,26 @@ end
     function [G,D] = fimeigenvalue_fmincon(obj, int)
         
         [l,v] = getFeig(obj, int);
-        G = -log(l);
+        
+        if scalebyresidual
+            res = 0;
+            for i = numel(int):-1:1
+                err = obj(i).err(int(i));
+                res = res + err.'*err;
+            end
+            G = -log(l/res);
+        else
+            G = -log(l);
+        end
         
         if nargout > 1
             % Collect derrdT and d2errdT2*v
             for i = numel(int):-1:1
                 derrdT{i} = obj(i).derrdT(int(i));
                 
+                if scalebyresidual
+                    dresdT{i} = obj(i).dGdT(int(i));
+                end
                 % Calculate d2errdT2*v by swapping d2ydT2*v in for dydT
                 % and passing it into the same derrdT function
                 int_temp = int(i);
@@ -117,12 +143,16 @@ end
             end
             derrdT = vertcat(derrdT{:});
             d2errdT2_v = vertcat(d2errdT2_v{:});
+            dresdT = sum([dresdT{:}],2); % row vector
             
             D = 2*d2errdT2_v.'*derrdT*v;
 %             if int(1).Normalized
 %                 D = D + 2*(derrdT.'*derrdT)*v;
 %             end
             D = -1./l*D;
+            if scalebyresidual
+                D = D + 1./res.*dresdT;
+            end
         end
         
     end

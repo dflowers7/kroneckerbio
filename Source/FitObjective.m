@@ -1,4 +1,4 @@
-function [m, con, G, D] = FitObjective(m, con, obj, opts)
+function [m, con, G, D, exitflag] = FitObjective(m, con, obj, opts)
 %FitObjective Optimize the parameters of a model to minimize a set of
 %   objective functions
 %
@@ -137,7 +137,15 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           corresponding constraint objective function's value in
 %           opts.ConstraintObj.
 %       .IntegrateFunction
-%       .ObjectiveReductionFunction
+%       .ObjectiveReductionFunction [ function handle ]
+%           The function, fun(obj,int), has two input arguments: (1) obj,
+%           the objective struct, and (2) int, the integration struct
+%           returned by integrating obj over the model and experiments. It
+%           returns up to two output arguments: (1) the overall objective
+%           value to be minimized, and (2) the gradient of the objective
+%           value with respect to the fit parameters, expressed as a column
+%           vector. The default function sums obj(i).G(int(i)) over i to
+%           calculate the objective value.
 %       .ConstraintIntegrateFunction
 %       .ConstraintReductionFunction
 %       .GlobalOptimization [ logical scalar {false} ]
@@ -156,6 +164,10 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           The optimum objective function value
 %       D: [ real vector nT ]
 %           The objective gradient at the optimum parameter set
+%       exitflag [ numeric scalar ]
+%           Indicates why the fit terminated. Values' meanings differ
+%           depending on the fit function used. See documentation for
+%           fmincon and other fitting functions for details.
 
 % (c) 2015 David R Hagen & Bruce Tidor
 % This work is released under the MIT license.
@@ -176,6 +188,13 @@ assert(isscalar(m), 'KroneckerBio:FitObjective:MoreThanOneModel', 'The model str
 
 [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts);
 
+% Normalize parameters and bounds
+if opts.Normalized
+    opts.LowerBound = log(opts.LowerBound);
+    opts.UpperBound = log(opts.UpperBound);
+    T0 = log(T0);
+end
+
 %% Global optimization options
 % TODO: make sure options are relevant for solver
 globalOpts = opts.GlobalOpts;
@@ -184,7 +203,6 @@ globalOpts = opts.GlobalOpts;
 if strcmpi(globalOpts.Algorithm, 'multistart') && globalOpts.UseParallel
     warning('KroneckerBio:FitObjective:InvalidMultistartOpts', 'Using multistart with UseParallel is not supported at this time (due to global variable in obj fun usage).')
 end
-
 
 %% Generate objective and constraint functions
 

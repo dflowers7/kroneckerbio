@@ -165,10 +165,10 @@ for i_con = 1:n_con
     inT = nTk + inTs + inTq + inTh;
     
     % Sensitivity integration if not provided
-    if isempty(dxdTSol) || isempty(dxdTSol{iCon})
+    if isempty(dxdTSol) || isempty(dxdTSol{i_con})
         ints = integrateAllSens(m, con(i_con), obj(:,i_con), opts_i);
     else
-        ints = dxdTSol{iCon};
+        ints = dxdTSol{i_con};
     end
     
     % Sum all FIMs as computed by each objective function

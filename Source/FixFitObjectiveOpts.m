@@ -1,4 +1,9 @@
 function [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts)
+% [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts)
+% Output arguments:
+%   funopts
+%       Options for building the objective and constraint function, for
+%       inputting into GenerateObjective().
 
 % Default options
 defaultOpts.Verbose          = 1;
@@ -38,14 +43,14 @@ defaultOpts.MaxFunEvals      = 5000;
 defaultOpts.OutputFcn              = [];
 defaultOpts.ParallelizeExperiments = false;
 
-defaultOpts.ConstraintObj    = [];
+defaultOpts.ConstraintObj    = {};
 defaultOpts.ConstraintVal    = [];
 
 defaultOpts.IntegrateFunction               = [];
 defaultOpts.ObjectiveReductionFunction      = [];
 defaultOpts.ConstraintIntegrateFunction     = [];
 defaultOpts.ConstraintReductionFunction     = [];
-defaultOpts.ScaleConstraints                = [];
+defaultOpts.ScaleConstraints                = false;
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
@@ -79,7 +84,9 @@ ns = m.ns;
 
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
-[obj, n_obj] = fixObjective(obj, n_con);
+if ~isempty(obj)
+    [obj, n_obj] = fixObjective(obj, n_con);
+end
 
 % Ensure UseParams is logical vector
 [opts.UseParams, nTk] = fixUseParams(opts.UseParams, nk);
@@ -149,7 +156,11 @@ switch opts.Solver
         localOpts.RelLineSrchBnd          = opts.MaxStepSize;
         localOpts.RelLineSrchBndDuration  = Inf;
         localOpts.TolCon                  = 1e-6;
-        localOpts.SpecifyConstraintGradient = isNonlinearConstraint;
+        if isNonlinearConstraint
+            localOpts.SpecifyConstraintGradient = true;
+        end
+%         localOpts.HessianApproximation    = opts.HessianApproximation; % only used for 'interior-point' algorithm
+%         localOpts.SubproblemAlgorithm     = opts.SubproblemAlgorithm;
     case 'lsqnonlin'
         localOpts.Jacobian                  = 'on'; % For older versions of MATLAB
         % The following options are for newer versions of MATLAB that
@@ -188,10 +199,6 @@ else
 end
 
 if opts.Normalized
-    % Normalize bounds
-    opts.LowerBound = log(opts.LowerBound);
-    opts.UpperBound = log(opts.UpperBound);
-    
     % Change relative line search bound to an absolute scale in log space
     % Because fmincon lacks an absolute option, this hack circumvents that
     if strcmp(opts.Solver, 'fmincon') && strcmp(opts.Algorithm, 'active-set')
@@ -205,22 +212,17 @@ end
 % Construct starting variable parameter set
 T0 = collectActiveParameters(m, con, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
 
-% Normalize parameters
-if opts.Normalized
-    T0 = log(T0);
-end
-
 % Apply bounds to starting parameters before optimizing
 % fmincon will choose a wierd value if a starting parameter is outside the bounds
 belowLowerBounds = T0 < opts.LowerBound;
 if any(belowLowerBounds)
-    warning('Parameter %g was below its lower bound. Resetting it to its lower bound...', find(belowLowerBounds))
+    warning('Parameter %g was below its lower bound by %g. Resetting it to its lower bound...', [find(belowLowerBounds).'; (opts.LowerBound(belowLowerBounds)-T0(belowLowerBounds))'])
 end
 T0(belowLowerBounds) = opts.LowerBound(belowLowerBounds);
 
 aboveUpperBounds = T0 > opts.UpperBound;
 if any(aboveUpperBounds)
-    warning('Parameter %g is above its upper bound. Resetting it to its upper bound...', find(aboveUpperBounds))
+    warning('Parameter %g is above its upper bound by %g. Resetting it to its upper bound...', [find(aboveUpperBounds).'; (T0(aboveUpperBounds)-opts.UpperBound(aboveUpperBounds)).'])
 end
 T0(aboveUpperBounds) = opts.UpperBound(aboveUpperBounds);
 
@@ -236,7 +238,7 @@ funopts.ScaleConstraints = opts.ScaleConstraints;
             case 'lsqnonlin'
                 fval = optimValues.resnorm.^2;
         end
-        if fval  < opts.TerminalObj
+        if strcmp(state,'iter') && fval  < opts.TerminalObj % Only stop at the end of iterations to avoid parameters not being updated
             aborted = true;
             Tabort = x;
             stop = true;
