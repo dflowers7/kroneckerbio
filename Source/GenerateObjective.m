@@ -65,16 +65,16 @@ if isempty(objectiveFunction)
     end
 end
 
-nconstraints = numel(opts.ConstraintVal);
+nconstraintfuns = numel(opts.ConstraintObj);
 
 if isempty(integrateFunctions_constraint)
-    integrateFunctions_constraint = repmat({{@integrateAllSys;@integrateAllSys;@integrateAllSens;@integrateAllSens}}, nconstraints, 1);
+    integrateFunctions_constraint = repmat({{@integrateAllSys;@integrateAllSys;@integrateAllSens;@integrateAllSens}}, nconstraintfuns, 1);
 end
 
 if isempty(constraintFunctions)
     switch opts.Solver
         case 'fmincon'
-            constraintFunctions = repmat({@sumobjectives_fmincon_constraint}, nconstraints, 1);
+            constraintFunctions = repmat({@sumobjectives_fmincon_constraint}, nconstraintfuns, 1);
         case 'lsqnonlin'
             constraintFunctions = cell(0,1);
     end
@@ -93,7 +93,7 @@ assert(islogical(ScaleConstraints) && isscalar(ScaleConstraints), ...
     'KroneckerBio:GenerateObjective:ScaleConstraints', ...
     'ScaleConstraints must be a logical scalar.')
 
-assert(~strcmp(opts.Solver,'lsqnonlin') || nconstraints == 0, ...
+assert(~strcmp(opts.Solver,'lsqnonlin') || nconstraintfuns == 0, ...
     'KroneckerBio:GenerateObjective:NonlinearConstraintWithLsqnonlin', ...
     'lsqnonlin does not support nonlinear constraint functions. Use fmincon instead.')
 
@@ -145,7 +145,7 @@ for ii = 1:size(intfuns_kk,1)
         end
     end
 end
-for kk = 1:nconstraints
+for kk = 1:nconstraintfuns
     intfuns_kk = integrateFunctions_constraint{kk};
     for ii = 1:size(intfuns_kk,1)
         for jj = 1:size(intfuns_kk,2)
@@ -543,33 +543,59 @@ end
             T(T < opts.LowerBound) = opts.LowerBound(T < opts.LowerBound);
         end
         
-        fun_i = nargout;
-        if fun_i == 0
-            fun_i = 1;
+        nargout_ = nargout;
+        if nargout_ == 0
+            nargout_ = 1;
         end
         
-        nconstraints = numel(integrateFunctions_constraint);
-        varargout = cell(fun_i,1);
-        out_i = cell(fun_i,1);
+        nconstraintfuns = numel(integrateFunctions_constraint);
+        
+        % Initialize output cell array
+        varargout = cell(nargout_,1);
+        for j = 1:nargout_
+            varargout{j} = cell(nconstraintfuns,1);
+        end
+        
+        % Calculate constraint function value for each constraint function
+        out_i = cell(nargout_,1);
         isobjective = false;
-        for i = nconstraints:-1:1
+        for i = 1:nconstraintfuns
             index = i;
-            int_i = integr(T, integrateFunctions_constraint{i}(fun_i,:), isobjective, index);
+            int_i = integr(T, integrateFunctions_constraint{i}(nargout_,:), isobjective, index);
             [out_i{:}] = constraintFunctions{i}(constr_obj{i}, int_i);
-            for j = 1:fun_i
+            for j = 1:nargout_
                 if ~isempty(out_i{j})
+                    varargout{j}{i} = out_i{j};
+                end
+            end
+        end
+        
+        % Concatenate constraint function values across constraint
+        % functions
+        for j = 1:nargout_
+            if j <= 2
+                varargout{j} = vertcat(varargout{j}{:});
+            else
+                varargout{j} = [varargout{j}{:}];
+            end
+        end
+        
+        % Subtract constraint values from evaluated values, such that
+        % all constraints are considered violated when positive
+        for j = 1:min(nargout_,2)
+            if ~isempty(varargout{j})
+                varargout{j} = varargout{j} - constr_vals;
+            end
+        end
+        
+        % Scale by constraint values, if requested
+        if ScaleConstraints
+            for j = 1:nargout_
+                if ~isempty(varargout{j})
                     if j <= 2
-                        if ScaleConstraints
-                            varargout{j}(i,1) = out_i{j}./abs(constr_vals(i)) - sign(constr_vals(i));
-                        else
-                            varargout{j}(i,1) = out_i{j} - constr_vals(i);
-                        end
+                        varargout{j} = varargout{j}./abs(constr_vals);
                     else
-                        if ScaleConstraints
-                            varargout{j}(:,i) = out_i{j}./abs(constr_vals(i));
-                        else
-                            varargout{j}(:,i) = out_i{j};
-                        end
+                        varargout{j} = bsxfun(@rdivide, varargout{j}, abs(constr_vals(:).'));
                     end
                 end
             end
