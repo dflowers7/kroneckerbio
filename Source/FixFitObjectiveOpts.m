@@ -52,6 +52,9 @@ defaultOpts.ConstraintIntegrateFunction     = [];
 defaultOpts.ConstraintReductionFunction     = [];
 defaultOpts.ScaleConstraints                = false;
 
+defaultOpts.UseScaledHessianApprox = false;
+defaultOpts.HessianApproximation = 'bfgs';
+
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
 
@@ -159,7 +162,7 @@ switch opts.Solver
         if isNonlinearConstraint
             localOpts.SpecifyConstraintGradient = true;
         end
-%         localOpts.HessianApproximation    = opts.HessianApproximation; % only used for 'interior-point' algorithm
+        localOpts.HessianApproximation    = opts.HessianApproximation; % only used for 'interior-point' algorithm
 %         localOpts.SubproblemAlgorithm     = opts.SubproblemAlgorithm;
     case 'lsqnonlin'
         localOpts.Jacobian                  = 'on'; % For older versions of MATLAB

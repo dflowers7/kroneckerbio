@@ -1,4 +1,4 @@
-function [objfun, constrfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions, funopts)
+function [objfun, constrfun, hessianapproxfun, outfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions, funopts, other_outfun)
 % Input arguments:
 %   m
 %   con
@@ -34,20 +34,27 @@ function [objfun, constrfun] = GenerateObjective(m, con, obj, opts, integrateFun
 %           instead of 
 %               f(T) <= constraint_value.
 
-if nargin < 9
-    funopts = [];
-    if nargin < 8
-        constraintFunctions = [];
-        if nargin < 7
-            integrateFunctions_constraint = [];
-            if nargin < 6
-                objectiveFunction = [];
-                if nargin < 5
-                    integrateFunctions_objective = [];
+if nargin < 10
+    other_outfun = [];
+    if nargin < 9
+        funopts = [];
+        if nargin < 8
+            constraintFunctions = [];
+            if nargin < 7
+                integrateFunctions_constraint = [];
+                if nargin < 6
+                    objectiveFunction = [];
+                    if nargin < 5
+                        integrateFunctions_objective = [];
+                    end
                 end
             end
         end
     end
+end
+
+if isempty(other_outfun)
+    other_outfun = @(x, optimValues, state) false;
 end
 
 % Set default integrate, objective, and constraint functions if no custom
@@ -251,6 +258,12 @@ end
 
 displayedMemoWarning = false;
 
+% Initialize Hessian approximation variables
+Tlast_hessian = [];
+Dlast_hessian = [];
+H_last_possible = [];
+H_last = [];
+
 objfun = @objective;
 if hasconstraint
     constrfun = @constraint;
@@ -258,6 +271,8 @@ else
     % Set to empty so that fmincon knows there is no constraint
     constrfun = [];
 end
+hessianapproxfun = @hessian_spectralscaledbfgs;
+outfun = @outfun_;
 
     function int_return = integr(T, integrateFunctions, isobjective_return, index_return)
         
@@ -601,6 +616,49 @@ end
             end
         end
         
+    end
+
+    function H = hessian_spectralscaledbfgs(T, lambda)
+        
+        mem = 3;
+        
+        [~,D_hessian] = objective(T);
+        if hasconstraint
+            [~,~,gc_hessian] = constraint(T);
+            lc = lambda.ineqnonlin;
+            D_hessian = D_hessian + gc_hessian*lc(:);
+        end
+        
+        if isempty(Tlast_hessian)
+            Tlast_hessian = T;
+            Dlast_hessian = D_hessian;
+            H = eye(numel(T));
+            H_last_possible = H;
+            return
+        end
+        
+        s = T - Tlast_hessian;
+        y = D_hessian - Dlast_hessian;
+        gam = y.'*s/(y.'*y);
+        yhat = gam*y;
+        
+        H_last_s = H_last*s;
+        H = H_last - H_last_s*H_last_s.'/(s.'*H_last_s) + yhat*yhat.'/(yhat.'*s);
+        
+        H_last_possible = H;
+        
+    end
+
+    function stop = outfun_(x, optimValues, state)
+        % Output function updates "last" values used for Hessian
+        % approximation via BFGS
+        switch state
+            case 'iter'
+                Tlast_hessian = x;
+                Dlast_hessian = optimValues.gradient;
+                H_last = H_last_possible;
+        end
+        stop = other_outfun(x, optimValues, state);
     end
 
     function int = get_memoized_int(T, integrateFunction)

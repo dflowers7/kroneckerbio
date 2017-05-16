@@ -1,4 +1,4 @@
-function [m, con, G, D, exitflag] = FitObjective(m, con, obj, opts)
+function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %FitObjective Optimize the parameters of a model to minimize a set of
 %   objective functions
 %
@@ -148,6 +148,7 @@ function [m, con, G, D, exitflag] = FitObjective(m, con, obj, opts)
 %           calculate the objective value.
 %       .ConstraintIntegrateFunction
 %       .ConstraintReductionFunction
+%       .UseScaledHessianApprox [ false ]
 %       .GlobalOptimization [ logical scalar {false} ]
 %           Use global optimization in addition to fmincon
 %       .GlobalOpts [ options struct scalar {} ]
@@ -209,10 +210,15 @@ end
 % Generate the objective and constraint functions
 % TODO: set up adjoint integration function
 % Fix global optimization (currently untested)
-[objective,constraint] = GenerateObjective(m, con, obj, opts, ...
+[objective,constraint,hessian,outfun] = GenerateObjective(m, con, obj, opts, ...
     opts.IntegrateFunction, opts.ObjectiveReductionFunction, ...
     opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction, ...
-    funopts);
+    funopts, localOpts.OutputFcn);
+
+if strcmp(localOpts.Algorithm, 'interior-point') && opts.UseScaledHessianApprox
+    localOpts.HessianFcn = hessian;
+    localOpts.OutputFcn = outfun;
+end
 
 %% Abort in rare case of no optimization
 if numel(T0) == 0
@@ -233,6 +239,8 @@ if opts.GlobalOptimization && opts.ParallelizeExperiments
         'were set to true. Disabling parallelized experiments.'])
     opts.ParallelizeExperiments = false;
 end
+
+output = struct;
 
 for iRestart = 1:opts.Restart+1
     % Init abort parameters
@@ -276,9 +284,9 @@ for iRestart = 1:opts.Restart+1
         if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
         switch opts.Solver
             case 'fmincon'
-                [That, G, exitflag, ~, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
+                [That, G, exitflag, output, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
             case 'lsqnonlin'
-                [That,G,~,exitflag,~,~,D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
+                [That,G,~,exitflag, output, ~, D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
             otherwise
                 error('KroneckerBio:FitObjective:UnrecognizedSolver', ...
                     'Unrecognized solver %s', opts.Solver);
