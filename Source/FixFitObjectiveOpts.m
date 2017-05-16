@@ -42,6 +42,7 @@ defaultOpts.MaxFunEvals      = 5000;
 
 defaultOpts.OutputFcn              = [];
 defaultOpts.ParallelizeExperiments = false;
+defaultOpts.TimeoutDuration = [];
 
 defaultOpts.ConstraintObj    = {};
 defaultOpts.ConstraintVal    = [];

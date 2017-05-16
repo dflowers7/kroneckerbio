@@ -46,6 +46,10 @@ function G = ObjectiveValue(m, con, obj, opts)
 %           function value.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %
 %   Outputs
 %       G: [ real scalar ]
@@ -73,6 +77,8 @@ defaultOpts.UseParams        = 1:m.nk;
 defaultOpts.UseSeeds         = [];
 defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
+
+defaultOpts.TimeoutDuration = [];
 
 defaultOpts.ObjWeights     = ones(size(obj));
 

@@ -28,6 +28,8 @@ defaultOpts.UseParams      = 1:m.nk;
 defaultOpts.UseSeeds         = [];
 defaultOpts.UseControls    = [];
 
+defaultOpts.TimeoutDuration = [];
+
 defaultOpts.ObjWeights     = ones(size(obj));
 
 defaultOpts.Normalized     = true;

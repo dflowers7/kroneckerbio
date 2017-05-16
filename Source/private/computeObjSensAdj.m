@@ -73,10 +73,10 @@ for i_con = 1:n_con
     % Do not use select methods since the solution is needed at all time
     if opts.continuous(i_con)
         [der, jac, del] = constructObjectiveSystem();
-        sol_sys = accumulateOdeFwdComp(der, jac, 0, tF, [ic; 0], con(i_con).Discontinuities, 1:nx, opts.RelTol, opts_i.AbsTol(1:nx+1), del, eve, fin);
+        sol_sys = accumulateOdeFwdComp(der, jac, 0, tF, [ic; 0], con(i_con).Discontinuities, 1:nx, opts.RelTol, opts_i.AbsTol(1:nx+1), del, eve, fin, opts.TimeoutDuration);
     else
         [der, jac, del] = constructSystem();
-        sol_sys = accumulateOdeFwdComp(der,jac, 0, tF, ic, con(i_con).Discontinuities, 1:nx, opts.RelTol, opts_i.AbsTol(1:nx), del, eve, fin);
+        sol_sys = accumulateOdeFwdComp(der,jac, 0, tF, ic, con(i_con).Discontinuities, 1:nx, opts.RelTol, opts_i.AbsTol(1:nx), del, eve, fin, opts.TimeoutDuration);
     end
     
     % Work down
@@ -167,7 +167,7 @@ for i_con = 1:n_con
     ic = zeros(nx+inT,1);
     
     % Integrate [lambda; D] backward in time
-    sol = accumulateOdeRevSelect(der, jac, 0, tF, ic, [con(i_con).Discontinuities; discrete_times], 0, [], opts.RelTol, opts_i.AbsTol(nx+opts.continuous(i_con)+1:nx+opts.continuous(i_con)+nx+inT), del);
+    sol = accumulateOdeRevSelect(der, jac, 0, tF, ic, [con(i_con).Discontinuities; discrete_times], 0, [], opts.RelTol, opts_i.AbsTol(nx+opts.continuous(i_con)+1:nx+opts.continuous(i_con)+nx+inT), del, [], [], [], opts.TimeoutDuration);
     
     % * Complete steady-state *
     if con(i_con).SteadyState
@@ -178,7 +178,7 @@ for i_con = 1:n_con
         ic = sol.y;
         
         % Integrate [lambda; D] backward in time and replace previous run
-        sol = accumulateOdeRevSelect(der, jac, 0, ssSol.xe, ic, con(i_con).private.BasalDiscontinuities, 0, [], opts.RelTol, opts_i.AbsTol(nx+opts.continuous(i_con)+1:nx+opts.continuous(i_con)+nx+inT));
+        sol = accumulateOdeRevSelect(der, jac, 0, ssSol.xe, ic, con(i_con).private.BasalDiscontinuities, 0, [], opts.RelTol, opts_i.AbsTol(nx+opts.continuous(i_con)+1:nx+opts.continuous(i_con)+nx+inT), [], [], [], [], opts.TimeoutDuration);
     end
     
     % *Add contributions to derivative*

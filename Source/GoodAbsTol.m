@@ -37,6 +37,10 @@ function absTol = GoodAbsTol(m, con, sd, opts)
 %       .RelTol [ nonnegative scalar {1e-6} ]
 %           Relative tolerance of the integration. This is used to scale
 %           the good absolute tolerances.
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %
 %   Outputs
 %   absTol: [ struct vector nCon ]
@@ -59,6 +63,8 @@ defaultOpts.UseParams        = 1:m.nk;
 defaultOpts.UseSeeds         = [];
 defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
+
+defaultOpts.TimeoutDuration = [];
 
 opts = mergestruct(defaultOpts, opts);
 

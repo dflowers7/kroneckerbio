@@ -55,7 +55,7 @@ else
 end
 
 % Integrate [f; dfdT; d2fdT2] over time
-sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT+nx*nT*nT), del, eve, fin);
+sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.Discontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT+nx*nT*nT), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.Curvature.Complex';

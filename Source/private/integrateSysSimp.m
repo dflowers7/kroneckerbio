@@ -23,7 +23,7 @@ end
 % Integrate f over time
 % If no requested points, an empty sol should be returned without
 % performing any integration
-sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin);
+sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.System.Simple';

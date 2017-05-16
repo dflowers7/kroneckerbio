@@ -1,4 +1,4 @@
-function cum_sol = accumulateOdeFwdComp(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, is_finished)
+function cum_sol = accumulateOdeFwdComp(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, is_finished, timeoutdurationinsec)
 % function cumSol = accumulateOdeFwdCom[(der, jac, t0, tF, ic, discontinuities, 
 % nonnegative, RelTol, AbsTol, delta, events, is_finished)
 
@@ -6,12 +6,15 @@ function cum_sol = accumulateOdeFwdComp(der, jac, t0, tF, ic, discontinuities, n
 
 %% Work-up
 % Clean up inputs
-if nargin < 12
-    is_finished = [];
-    if nargin < 11
-        events = [];
-        if nargin < 10
-            delta = [];
+if nargin < 13
+    timeoutdurationinsec = [];
+    if nargin < 12
+        is_finished = [];
+        if nargin < 11
+            events = [];
+            if nargin < 10
+                delta = [];
+            end
         end
     end
 end
@@ -28,6 +31,9 @@ forward_boost = 4;   % Number of epsilons to jump at a discontinuity
 sim_opts = odeset('Jacobian', jac, 'AbsTol', AbsTol, 'RelTol', RelTol, 'NonNegative', nonnegative);
 if ~isempty(events)
     sim_opts.Events = events;
+end
+if ~isempty(timeoutdurationinsec)
+    sim_opts.OutputFcn = timeoutOutputFunction(timeoutdurationinsec);
 end
 
 %% Initialize variables

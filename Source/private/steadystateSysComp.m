@@ -20,8 +20,8 @@ else
 end
 
 % Integrate f over time
-%     accumulateOdeFwdComp(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, is_finished)
-sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.private.BasalDiscontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx), [], eve, @(cum_sol)true);
+%     accumulateOdeFwdComp(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, is_finished, timeoutduration)
+sol = accumulateOdeFwdComp(der, jac, 0, tF, ic, con.private.BasalDiscontinuities, 1:nx, opts.RelTol, opts.AbsTol(1:nx), [], eve, @(cum_sol)true, opts.TimeoutDuration);
 sol.u = con.u;
 sol.k = m.k;
 sol.s = con.s;
