@@ -53,8 +53,11 @@ defaultOpts.ConstraintIntegrateFunction     = [];
 defaultOpts.ConstraintReductionFunction     = [];
 defaultOpts.ScaleConstraints                = false;
 
-defaultOpts.UseScaledHessianApprox = false;
+defaultOpts.UseImprovedHessianApprox = false;
+defaultOpts.HessianApproxMaximumConditionNumber = 1000;
+defaultOpts.ApproximateSecondOrderHessianTerm = true;
 defaultOpts.HessianApproximation = 'bfgs';
+defaultOpts.SubproblemAlgorithm = 'factorization';
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
@@ -153,6 +156,7 @@ localOpts.TolFun                  = opts.TolOptim;
 localOpts.TolX                    = 0;
 localOpts.MaxFunEvals             = opts.MaxFunEvals;
 localOpts.MaxIter                 = opts.MaxIter;
+
 switch opts.Solver
     case 'fmincon'
         localOpts.GradObj                 = 'on';
@@ -164,7 +168,7 @@ switch opts.Solver
             localOpts.SpecifyConstraintGradient = true;
         end
         localOpts.HessianApproximation    = opts.HessianApproximation; % only used for 'interior-point' algorithm
-%         localOpts.SubproblemAlgorithm     = opts.SubproblemAlgorithm;
+        localOpts.SubproblemAlgorithm     = opts.SubproblemAlgorithm;
     case 'lsqnonlin'
         localOpts.Jacobian                  = 'on'; % For older versions of MATLAB
         % The following options are for newer versions of MATLAB that
@@ -231,6 +235,12 @@ end
 T0(aboveUpperBounds) = opts.UpperBound(aboveUpperBounds);
 
 funopts.ScaleConstraints = opts.ScaleConstraints;
+if isempty(opts.HessianApproxMaximumConditionNumber)
+    funopts.HessianMaximumConditionNumber = defaultOpts.HessianApproxMaximumConditionNumber;
+else
+    funopts.HessianMaximumConditionNumber = opts.HessianApproxMaximumConditionNumber;
+end
+funopts.ApproximateSecondOrderHessianTerm = opts.ApproximateSecondOrderHessianTerm;
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%% Halt optimization on terminal goal %%%%%

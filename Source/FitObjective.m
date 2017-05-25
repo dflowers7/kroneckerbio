@@ -148,7 +148,22 @@ function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %           calculate the objective value.
 %       .ConstraintIntegrateFunction
 %       .ConstraintReductionFunction
-%       .UseScaledHessianApprox [ false ]
+%       .UseImprovedHessianApprox [ false ]
+%           If set to true, and opts.Algorith is set to 'interior-point',
+%           an improved approximation of the Hessian is used instead of the
+%           default bfgs update. The improved Hessian uses the Fisher
+%           Information Matrix in addition to other optional terms to
+%           approximate the Hessian for least-squares objective functions.
+%       .HessianApproxMaximumConditionNumber [ 1000 ]
+%           If left empty, the default value will be used. Is only used if
+%           .UseImprovedHessianApprox is set to true.
+%       .ApproximateSecondOrderHessianTerm [ true ]
+%           If set to true, a structured BFGS update is used to approximate
+%           the Hessian term corresponding to second derivatives of the
+%           error function of least squares objective functions. This is
+%           only used if .UseImprovedHessianApprox is set to true.
+%       .SubproblemAlgorithm
+%           'factorization' or 'cg'
 %       .TimeoutDuration [ nonnegative scalar {[]} ]
 %           Sets an upper limit to the amount of time an integration may
 %           take. Any integration taking longer than this throws an error.
@@ -219,7 +234,7 @@ end
     opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction, ...
     funopts, localOpts.OutputFcn);
 
-if strcmp(localOpts.Algorithm, 'interior-point') && opts.UseScaledHessianApprox
+if strcmp(localOpts.Algorithm, 'interior-point') && opts.UseImprovedHessianApprox
     localOpts.HessianFcn = hessian;
     localOpts.OutputFcn = outfun;
 end

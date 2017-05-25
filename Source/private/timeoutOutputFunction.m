@@ -9,6 +9,8 @@ fun = @outputfun;
 
     function stop = outputfun(t, y, flag)
         
+        thisstop = false;
+        
         % Run other output function, if provided
         if isempty(otherOutputFun)
             stop = false;

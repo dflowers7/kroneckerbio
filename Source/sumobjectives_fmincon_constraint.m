@@ -1,11 +1,13 @@
-function [c,ceq,GC,GCeq] = sumobjectives_fmincon_constraint(obj, int)
+function [c,ceq,GC,GCeq,err,derrdT] = sumobjectives_fmincon_constraint(obj, int)
 
 % nconstraints = numel(obj);
 % for i = nconstraints:-1:1
 if nargout <= 2
     c = sumobjectives_fmincon(obj, int);
-else
+elseif nargout <= 4
     [c,GC] = sumobjectives_fmincon(obj, int);
+else
+    [c,GC,err,derrdT] = sumobjectives_fmincon(obj, int);
 end
 %end
 
