@@ -26,7 +26,12 @@ if any([obs.Complex])
         end
     end
 else
-    ints = integrateSysSimp(m, con, tF, eve, fin, t_get, opts);
+    switch opts.Integrator
+        case 'sundials'
+            ints = integrateSysSimpSundials(m, con, tF, eve, fin, t_get, opts);
+        otherwise
+            ints = integrateSysSimp(m, con, tF, eve, fin, t_get, opts);
+    end
     
     % Distribute times for each observation
     ints = repmat(ints, n_obs,1);

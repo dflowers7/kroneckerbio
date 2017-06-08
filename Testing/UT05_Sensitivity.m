@@ -76,25 +76,54 @@ obs = observationEvents(10, eve);
 verifySensitivityEvent(a, m, con, obs, opts)
 end
 
+function testSimulateSensitivitySimpleAdjoint(a)
+[m, con, ~, opts] = simple_model();
+tGet = 1:6;
+
+opts.AdjointOutputSensitivities = false(m.ny, 1);
+opts.AdjointOutputSensitivities(1) = true;
+verifySensitivity(a, m, con, tGet, opts)
+end
+
 function verifySensitivity(a, m, con, tGet, opts)
 opts.ComplexStep = true;
 obsSelect = observationSelect(tGet);
 
 opts.Normalized = false;
+opts.Integrator = 'sundials';
+sim2_sundials = SimulateSensitivity(m, con, obsSelect, opts);
+opts.Integrator = 'ode15s';
 sim1 = SimulateSensitivity(m, con, max(tGet), opts);
 sim2 = SimulateSensitivity(m, con, obsSelect, opts);
 sim3 = FiniteSimulateSensitivity(m, con, obsSelect, opts);
 
+if ~isfield(opts, 'AdjointOutputSensitivities') || isempty(opts.AdjointOutputSensitivities) || ~any(opts.AdjointOutputSensitivities(:))
+    yIndices_y = 1:m.ny;
+else
+    yIndices_y = find(opts.AdjointOutputSensitivities);
+end
+nT = size(sim2.dydT, 1)/m.ny;
+isY = false(m.ny, nT);
+isY(yIndices_y, :) = true;
+yIndices_yT = find(isY);
+
 a.verifyEqual(sim1.dydT(tGet,1:m.ny), sim3.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
 a.verifyEqual(sim2.dydT, sim3.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim2_sundials.dydT, sim3.dydT(yIndices_yT,:), 'RelTol', 0.001, 'AbsTol', 1e-4)
+
+%a.verifyEqual(sim2_sundials.y, sim3.y(yIndices_y,:), 'RelTol', 0.001, 'AbsTol', 1e-4)
 
 opts.Normalized = true;
+opts.Integrator = 'sundials';
+sim5_sundials = SimulateSensitivity(m, con, obsSelect, opts);
+opts.Integrator = 'ode15s';
 sim4 = SimulateSensitivity(m, con, max(tGet), opts);
 sim5 = SimulateSensitivity(m, con, obsSelect, opts);
 sim6 = FiniteSimulateSensitivity(m, con, obsSelect, opts);
 
-a.verifyEqual(sim4.dydT(tGet,1:m.ny), sim6.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
-a.verifyEqual(sim5.dydT, sim6.dydT, 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim4.dydT(tGet,yIndices_y), sim6.dydT(yIndices_yT,:), 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim5.dydT(yIndices_yT,:), sim6.dydT(yIndices_yT,:), 'RelTol', 0.001, 'AbsTol', 1e-4)
+a.verifyEqual(sim5_sundials.dydT, sim6.dydT(yIndices_yT,:), 'RelTol', 0.001, 'AbsTol', 1e-4)
 end
 
 function verifySensitivityEvent(a, m, con, obs, opts)

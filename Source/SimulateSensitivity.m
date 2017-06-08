@@ -34,6 +34,18 @@ function sim = SimulateSensitivity(m, con, obs, opts)
 %                 nonegative scalar {1e-9} ]
 %           Absolute tolerance of the integration. If a cell vector is
 %           provided, a different AbsTol will be used for each experiment.
+%       .AdjointOutputSensitivities [ logical matrix ny by nCon | logical
+%                   vector ny | positive integer vector ([]) ]
+%           If .Integrator is set to 'sundials', this option indicates to
+%           use the adjoint method to calculate sensitivities for the
+%           indicated outputs. If left empty (the default) or if it is a
+%           logical matrix of false entries, the forward method will be
+%           used to calculate the sensitivities of all states and outputs.
+%           If any outputs are indicated, the adjoint method will be used
+%           to calculate the sensitivities of only the indicated outputs,
+%           bypassing the need to calculate sensitivities for all the
+%           states. If .Integrator is anything other than 'sundials', this
+%           option is ignored, and the forward method is used.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
 %       .TimeoutDuration [ nonnegative scalar {[]} ]
@@ -94,6 +106,7 @@ defaultOpts.UseParams        = 1:m.nk;
 defaultOpts.UseSeeds         = [];
 defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
+defaultOpts.AdjointOutputSensitivities = [];
 
 defaultOpts.TimeoutDuration = [];
 
@@ -106,6 +119,7 @@ opts.Verbose = max(opts.Verbose-1,0);
 nx = m.nx;
 nk = m.nk;
 ns = m.ns;
+ny = m.ny;
 
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
@@ -129,6 +143,12 @@ opts.RelTol = fixRelTol(opts.RelTol);
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
 opts.AbsTol = fixAbsTol(opts.AbsTol, 2, false(n_con,1), nx, n_con, false, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
 
+% Fix observations
+obs = fixObservation(con, obs);
+
+% Fix adjoint output sensitivity specification
+opts.AdjointOutputSensitivities = fixAdjointOutputSensitivities(opts.AdjointOutputSensitivities, ny, n_con);
+
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_con]);
 
@@ -139,6 +159,7 @@ for i_con = 1:n_con
     opts_i.UseSeeds = opts.UseSeeds(:,i_con);
     opts_i.UseInputControls = opts.UseInputControls{i_con};
     opts_i.UseDoseControls = opts.UseDoseControls{i_con};
+    opts_i.AdjointOutputSensitivities = opts.AdjointOutputSensitivities(:,i_con);
     
     % Integrate [x; dx/dT] over time
     if verbose; fprintf(['Integrating sensitivities for ' con(i_con).Name '...']); end
