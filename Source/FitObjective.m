@@ -162,6 +162,9 @@ function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %           the Hessian term corresponding to second derivatives of the
 %           error function of least squares objective functions. This is
 %           only used if .UseImprovedHessianApprox is set to true.
+%       .HessianGuess
+%           'FIM' or 'I' (the default). Only has an effect when the
+%           .Solver option is set to 'sqp'.
 %       .SubproblemAlgorithm
 %           'factorization' or 'cg'
 %       .TimeoutDuration [ nonnegative scalar {[]} ]
@@ -234,8 +237,28 @@ end
     opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction, ...
     funopts, localOpts.OutputFcn);
 
-if strcmp(localOpts.Algorithm, 'interior-point') && opts.UseImprovedHessianApprox
-    localOpts.HessianFcn = hessian;
+switch opts.HessianGuess
+    case 'I'
+        localOpts = struct(localOpts);
+        localOpts.HessMatrix = eye(nT);
+    case 'FIM'
+        localOpts = struct(localOpts);
+        if isempty(constraint)
+            temp1 = [];
+        else
+            [temp1,~,temp2,~] = constraint(T0);
+        end
+        FIM = hessian(T0, zeros(numel(temp1),1));
+        localOpts.HessMatrix = FIM;
+end
+
+if opts.UseImprovedHessianApprox
+    switch opts.Algorithm
+        case 'sqp'
+            localOpts.HessFun = hessian;
+        otherwise
+            localOpts.HessianFcn = hessian;
+    end
     localOpts.OutputFcn = outfun;
 end
 
@@ -267,15 +290,14 @@ for iRestart = 1:opts.Restart+1
     Tabort = That;
     lastT = That;
     
+    % Create local optimization problem
+    localProblem = createOptimProblem('fmincon', 'objective', objective, ...
+        'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
+        'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
+        'nonlcon', constraint, 'options', localOpts);
+    
     % Run specified optimization
     if opts.GlobalOptimization
-        
-        % Create local optimization problem
-        %   Used as a subset/refinement of global optimization
-        localProblem = createOptimProblem('fmincon', 'objective', objective, ...
-            'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
-            'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
-            'options', localOpts);
         
         if opts.Verbose
             fprintf('Beginning global optimization with %s...\n', globalOpts.Algorithm)
@@ -303,9 +325,18 @@ for iRestart = 1:opts.Restart+1
         if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
         switch opts.Solver
             case 'fmincon'
-                [That, G, exitflag, output, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
+                %[That, G, exitflag, output, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
+                [That, G, exitflag, output, ~, D] = fmincon(localProblem);
             case 'lsqnonlin'
                 [That,G,~,exitflag, output, ~, D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
+            case 'sqp'
+                localProblem.options = localOpts;
+                [That, output, ~, ~, exitflag] = sqp(localProblem);
+                % output(8)  = value of the function at the solution
+                % output(10) = number of function evaluations
+                % output(11) = number of gradient evaluations
+                % output(15) = number of iterations
+                [G,D] = objective(That);
             otherwise
                 error('KroneckerBio:FitObjective:UnrecognizedSolver', ...
                     'Unrecognized solver %s', opts.Solver);

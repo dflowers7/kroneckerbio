@@ -77,6 +77,8 @@ if isempty(objectiveFunction)
             objectiveFunction = @sumobjectives_fmincon;
         case 'lsqnonlin'
             objectiveFunction = @concatobjectives_lsqnonlin;
+        case 'sqp'
+            objectiveFunction = @sumobjectives_fmincon;
     end
 end
 
@@ -92,6 +94,8 @@ if isempty(constraintFunctions)
             constraintFunctions = repmat({@sumobjectives_fmincon_constraint}, nconstraintfuns, 1);
         case 'lsqnonlin'
             constraintFunctions = cell(0,1);
+        case 'sqp'
+            constraintFunctions = repmat({@sumobjectives_fmincon_constraint}, nconstraintfuns, 1);
     end
 end
 
@@ -279,6 +283,7 @@ isPureLeastSquares = [];
 max_hess_condno = funopts.HessianMaximumConditionNumber;
 useM = funopts.ApproximateSecondOrderHessianTerm;
 c = [];
+updateHessianVarsInHessFun = strcmp(opts.Solver, 'sqp');
 
 objfun = @objective;
 if hasconstraint
@@ -539,7 +544,7 @@ outfun = @outfun_;
         
     end
 
-    function varargout = objective(T)
+    function [G,D,err,derrdT] = objective(T)
         
         % Unnormalize
         if opts.Normalized
@@ -561,6 +566,16 @@ outfun = @outfun_;
         
         varargout = cell(nargout_,1);
         [varargout{:}] = objectiveFunction(obj, int);
+        G = varargout{1};
+        if nargout_ > 1
+            D = varargout{2};
+            if nargout_ > 2
+                err = varargout{3};
+                if nargout_ > 3
+                    derrdT = varargout{4};
+                end
+            end
+        end
 %         if nargout_ > 4
 %             varargout{5} = varargout(5);
 %         end
@@ -647,16 +662,22 @@ outfun = @outfun_;
 
     function H = hessian_approximation(T, lambda)
         
+        % If is a struct, extract the constraint
+        if isstruct(lambda)
+            lc_constr = lambda.ineqnonlin(:);
+        else
+            lc_constr = lambda(:);
+        end
+        
         % Calculate new gradients and get Lagrange multipliers
         [~, g_obj, err_obj, derrdT_obj] = objective(T);
         g_obj = {g_obj};
         lc = 1;
-        
         if hasconstraint
             [~, ~, g_constr, ~, err_constr, derrdT_constr] = constraint(T);
             g_constr = mat2cell(g_constr, nT, ones(size(g_constr,2),1));
             g_constr = g_constr(:);
-            lc = [lc; lambda.ineqnonlin(:)];
+            lc = [lc; lc_constr];
         else
             g_constr = {};
             err_constr = {};
@@ -691,12 +712,20 @@ outfun = @outfun_;
             % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
             % SHOULD BE COMMENTED OUT.
             %c = 0;
-            M_last_hess_possible = zeros(nT);
+            %M_last_hess_possible = zeros(nT);
             % ...or...
-            %M_last_hess_possible = c*eye(nT);
+            M_last_hess_possible = c*eye(nT);
             % It's not clear whether I should do this or not
             %H = B + c*diag(diag(B));
-            H = B + c*eye(nT);
+            %H = B + c*eye(nT);
+            H = B + M_last_hess_possible;
+            
+            if updateHessianVarsInHessFun
+                T_last_hess = T;
+                gs_last_hess = gs_last_hess_possible;
+                errs_last_hess = errs_last_hess_possible;
+                M_last_hess = M_last_hess_possible;
+            end
             return
         end
         
@@ -742,6 +771,7 @@ outfun = @outfun_;
         
         %H = B + c*diag(diag(B));
         H = B + c*eye(nT);
+        H = (H+H.')/2; % Ensure symmetric enough to avoid warnings
         % ...or...
         %M = M + c*eye(nT);
         %H = JTJ + M;
@@ -752,6 +782,13 @@ outfun = @outfun_;
         gs_last_hess_possible = gs;
         errs_last_hess_possible = errs;
         M_last_hess_possible = M;
+        
+        if updateHessianVarsInHessFun
+            T_last_hess = T;
+            gs_last_hess = gs_last_hess_possible;
+            errs_last_hess = errs_last_hess_possible;
+            M_last_hess = M_last_hess_possible;
+        end
         
     end
 

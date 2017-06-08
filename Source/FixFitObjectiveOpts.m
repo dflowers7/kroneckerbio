@@ -32,7 +32,7 @@ defaultOpts.TerminalObj      = -inf;
 
 defaultOpts.MaxStepSize      = 1;
 defaultOpts.Solver           = 'fmincon';
-if ~isfield(opts, 'Solver') || strcmp(opts.Solver, 'fmincon')
+if ~isfield(opts, 'Solver') || strcmp(opts.Solver, 'fmincon') || strcmp(opts.Solver, 'sqp')
     defaultOpts.Algorithm    = 'active-set';
 else
     defaultOpts.Algorithm    = 'trust-region-reflective';
@@ -58,6 +58,7 @@ defaultOpts.HessianApproxMaximumConditionNumber = 1000;
 defaultOpts.ApproximateSecondOrderHessianTerm = true;
 defaultOpts.HessianApproximation = 'bfgs';
 defaultOpts.SubproblemAlgorithm = 'factorization';
+defaultOpts.HessianGuess = 'I';
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
@@ -151,7 +152,14 @@ if isstruct(obj_constraint)
 end
 isNonlinearConstraint = ~isempty(obj_constraint);
 
-localOpts = optimoptions(opts.Solver);
+switch opts.Solver
+    case 'sqp'
+        % Use optimset because I need a struct, not an object, when using
+        % the sqp solver
+        localOpts = optimset('fmincon');
+    otherwise
+        localOpts = optimoptions(opts.Solver);
+end
 localOpts.TolFun                  = opts.TolOptim;
 localOpts.TolX                    = 0;
 localOpts.MaxFunEvals             = opts.MaxFunEvals;
@@ -181,6 +189,8 @@ switch opts.Solver
         
         assert(~isNonlinearConstraint, 'KroneckerBio:FitObjective:lsqnonlinNonlinearConstraintNotSupported', ...
             'The lsqnonlin solver does not support nonlinear constraints. Use the fmincon solver instead.')
+    case 'sqp'
+        localOpts.MaxStepSize = opts.MaxStepSize;
 end
 localOpts.Algorithm           = opts.Algorithm;
 providedOutputFcn             = opts.OutputFcn;
