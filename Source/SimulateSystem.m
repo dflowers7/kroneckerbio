@@ -118,7 +118,7 @@ opts.RelTol = fixRelTol(opts.RelTol);
 opts.AbsTol = fixAbsTol(opts.AbsTol, 1, false(n_con,1), nx, n_con);
 
 % Fix observations
-obs = fixObservation(con, obs);
+obs = fixObservation(obs, n_con);
 
 %% Run integration for the experiment
 sim = emptystruct([n_obs,n_con]);

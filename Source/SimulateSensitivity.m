@@ -143,6 +143,9 @@ opts.RelTol = fixRelTol(opts.RelTol);
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
 opts.AbsTol = fixAbsTol(opts.AbsTol, 2, false(n_con,1), nx, n_con, false, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
 
+derorder = 1;
+opts.AbsTolY = fixAbsTolY(opts.AbsTolY, ny, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls, derorder);
+
 % Fix observations
 obs = fixObservation(con, obs);
 

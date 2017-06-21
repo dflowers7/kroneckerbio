@@ -10,6 +10,8 @@ defaultOpts.Verbose          = 1;
 
 defaultOpts.RelTol           = [];
 defaultOpts.AbsTol           = [];
+defaultOpts.AbsTolY          = [];
+defaultOpts.RelTolY          = [];
 
 defaultOpts.Normalized       = true;
 defaultOpts.UseParams        = 1:m.nk;
@@ -19,7 +21,9 @@ defaultOpts.UseDoseControls  = [];
 
 defaultOpts.ObjWeights       = ones(size(obj));
 
-defaultOpts.UseAdjoint       = true;
+defaultOpts.UseAdjoint       = false;
+% May need a more detailed treatment here later
+defaultOpts.AdjointOutputSensitivities = false(m.ny,1);
 
 defaultOpts.LowerBound       = 0;
 defaultOpts.UpperBound       = inf;
@@ -60,6 +64,8 @@ defaultOpts.HessianApproximation = 'bfgs';
 defaultOpts.SubproblemAlgorithm = 'factorization';
 defaultOpts.HessianGuess = 'I';
 
+defaultOpts.Integrator = '';
+
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
 
@@ -89,6 +95,7 @@ end
 nx = m.nx;
 nk = m.nk;
 ns = m.ns;
+ny = m.ny;
 
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
@@ -129,6 +136,7 @@ end
 
 % RelTol
 opts.RelTol = fixRelTol(opts.RelTol);
+opts.RelTolY = fixRelTolY(opts.RelTolY);
 
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
 if opts.UseAdjoint
@@ -141,6 +149,8 @@ if strcmp(opts.Solver, 'lsqnonlin') && opts.UseAdjoint
     opts.UseAdjoint = false;
 end
 opts.AbsTol = fixAbsTol(opts.AbsTol, 2, opts.continuous, nx, n_con, opts.UseAdjoint, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
+derorder = 1;
+opts.AbsTolY = fixAbsTolY(opts.AbsTolY, ny, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls, derorder);
 
 % Bounds
 opts.LowerBound = fixBounds(opts.LowerBound, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);

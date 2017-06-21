@@ -523,11 +523,14 @@ while nit<=opts(15)
    % Solve QP problem for search direction
    %
 %  [s,u,statusqp]=qp(H,fp,gpv',-gv,[],[],s,nec,-1);
-   if nit <= Opts.NumShortSteps
-       maxstepsize = Opts.MaxStepSize;
-   else
-       maxstepsize = Inf;
-   end
+% TODO: add ability to limit step size in first few steps only. Below code
+% is toward this goal.
+    maxstepsize = Opts.MaxStepSize;
+%    if nit <= Opts.NumShortSteps
+%        maxstepsize = Opts.MaxStepSize;
+%    else
+%        maxstepsize = Inf;
+%    end
    [s,u,statusqp]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
    delta=0;sHsfail=0;z0p1fail=0;augfail=0;if aug=='f',nAS=0;end;aug='f';
    SCV=sum(abs(g(1:nec)))+sum(max(0,g(nec+1:ncs)));

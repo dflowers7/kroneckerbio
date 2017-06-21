@@ -21,6 +21,9 @@ if ~isempty(delta)
     dx0dT = dx0dT + delta(t0, x0); % add in the delta at the first timepoint
 end
 
+% Initialize data variable with dx0dT
+CVodeSet('UserData', dx0dT);
+
 % Initialize solver
 CVodeSensInit(nT, der, dx0dT, options); 
 

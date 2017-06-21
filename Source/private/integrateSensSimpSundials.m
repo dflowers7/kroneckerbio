@@ -23,6 +23,8 @@ dudq = con.dudq;
 dydx = m.dydx;
 dydu = m.dydu;
 dydk = m.dydk;
+d2ydkdx = m.d2ydkdx;
+d2ydx2 = m.d2ydx2;
 
 dkdT = sparse(find(opts.UseParams),1:nTk,1,nk,nT);
 
@@ -42,13 +44,29 @@ t0 = 0;
 
 %%%%%% Construct state system %%%%%%%%%
 
-[der_x, jac_x, del_x] = constructStateSystem();
+[der_x, jac_x, del_x, der_y] = constructStateSystem();
 
 x0_ = ic(1:nx);
 
 % Initialize integrator
 
 options_x = initializeStateOdesSundials(der_x, jac_x, t0, x0_, RelTol, AbsTol_x, del_x, eve);
+
+% Initialize quadratures for output integration
+
+dy0dk = m.dydx(t0, x0_, u(t0))*m.dx0dk(con.s) + m.dydk(t0, x0_, u(t0));
+dy0ds = m.dydx(t0, x0_, u(t0))*m.dx0ds(con.s);
+dy0dT = [dy0dk(:,opts.UseParams) dy0ds(:,opts.UseSeeds) sparse(ny, nTq+nTh)];
+y0_ = [
+    m.y(t0, x0_, u(t0))
+    vec(dy0dT)
+    ];
+ng = numel(y0_);
+
+RelTol_y = opts.RelTolY;
+AbsTol_y = opts.AbsTolY;
+
+initializeOutputOdesSundials(der_y, y0_, RelTol_y, AbsTol_y);
 
 %%%%% Construct sensitivity system %%%%%
 
@@ -60,7 +78,7 @@ options_dxdT = initializeStateSensitivityOdesSundials(der_dxdT, t0, x0_, dx0dT_,
 
 % Integrate f over time
 freeMemoryOnFinish = true;
-sol = accumulateOdeFwdSundials(options_x, options_dxdT, tF, t_get, discontinuities, x0_, dx0dT_, [], nx, nT, [], del_x, del_dxdT, eve, fin, freeMemoryOnFinish);
+sol = accumulateOdeFwdSundials(options_x, options_dxdT, tF, t_get, discontinuities, x0_, dx0dT_, y0_, nx, nT, ng, del_x, del_dxdT, eve, fin, freeMemoryOnFinish);
 
 % Work down
 int.Type = 'Integration.System.Simple';
@@ -160,9 +178,11 @@ int.sol = sol;
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%% The system for integrating f %%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function [der, jac, del] = constructStateSystem()
+    function [der, jac, del, der_y] = constructStateSystem()
         f     = m.f;
         dfdx  = m.dfdx;
+        dfdk  = m.dfdk;
+        dfdu  = m.dfdu;
         u     = con.u;
         d     = con.d;
         x0    = m.x0;
@@ -173,17 +193,17 @@ int.sol = sol;
         der = @derivative;
         jac = @jacobian;
         del = @delta;
+        der_y = @derivative_y;
         
         % Derivative of x with respect to time
-        function [val, flag, new_data] = derivative(t, x, data)
+        function [val, flag, data] = derivative(t, x, data)
             u_t = u(t);
             val = f(t, x, u_t);
             flag = 0;
-            new_data = [];
         end
         
         % Jacobian of x derivative
-        function [val, flag, new_data] = jacobian(t, x, data)
+        function [val, flag, data] = jacobian(t, x, f, data)
             u_t = u(t);
             val = full(dfdx(t, x, u_t));
             flag = 0;
@@ -192,6 +212,39 @@ int.sol = sol;
         % Dosing
         function val = delta(t, x)
             val = x0(d(t)) - x0(zeros(nd,1));
+        end
+        
+        function [val, flag, data] = derivative_y(t, x, data)
+            % WARNING: time derivative is incorrect for outputs with input
+            % terms because there is no good way currently to calculate the time
+            % derivative of the input!
+            % data: dxdT matrix, nx-by-nT, containing state sensitivities.
+            % data is updated when the sensitivities are evaluated below.
+            u_t = u(t);
+            f_t = f(t, x, u_t);
+            val = [dydx(t, x, u_t)*f_t;
+                d2ydxdT(t, x, u_t, data)*f_t + vec(dydx(t, x, u_t)*dfdT(t, x, u_t, data))];
+            flag = 0;
+        end
+        
+        function val = d2ydxdT(t, x, u, dxdT)
+            % Currently ignoring terms for derivatives of inputs, since
+            % outputs with input terms won't work anyway
+            % x: nx-by-1 vector of state values
+            % dxdT: nx-by-nT matrix of state sensitivities
+            temp1 = d2ydkdx(t, x, u);
+            temp1 = [temp1(:, opts.UseParams) sparse(ny*nx, nT-nTk)];
+            temp2 = d2ydx2(t, x, u)*dxdT;
+            val = temp1 + temp2;
+            val = spermute132(val, [ny nx nT], [ny*nT nx]);
+        end
+        
+        function val = dfdT(t, x, u, dxdT)
+            temp1 = dfdx(t,x,u)*dxdT;
+            temp2_k = dfdk(t,x,u);
+            temp2_q = dfdu(t,x,u)*dudq(t);
+            temp2 = [temp2_k(:,opts.UseParams) sparse(nx, nTs) temp2_q(:,opts.UseInputControls) sparse(nx, nTh)];
+            val = temp1 + temp2;
         end
     end
 
@@ -204,10 +257,11 @@ int.sol = sol;
         der = @derivative;
         del = @delta;
         
-        function [val, flag, new_data] = derivative(t, x, f, dxdT)
+        function [val, flag, new_data] = derivative(t, x, f, dxdT, data)
             u_i = u(t);
             val = dfdx(t, x, u_i)*dxdT + dfdT(t, x, u_i);
             flag = 0;
+            new_data = dxdT;
         end
         
         function val = delta(t, x)

@@ -1,4 +1,4 @@
-function errs = ObjectiveErrors(m, con, obj, opts)
+function [errs, derrsdT] = ObjectiveErrors(m, con, obj, opts)
 %ObjectiveErrors Evaluate the errors of objective functions
 %
 %   errs = ObjectiveErrors(m, con, obj, opts)
@@ -74,6 +74,9 @@ defaultOpts.UseSeeds         = [];
 defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
 
+defaultOpts.Integrator       = '';
+defaultOpts.Normalized       = true;
+
 defaultOpts.ObjWeights     = ones(size(obj));
 
 opts = mergestruct(defaultOpts, opts);
@@ -106,7 +109,13 @@ nT = nTk + nTs + nTq + nTh;
 opts.RelTol = fixRelTol(opts.RelTol);
 
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
-opts.AbsTol = fixAbsTol(opts.AbsTol, 1, opts.continuous, nx, n_con);
+order = nargout;
+opts.AbsTol = fixAbsTol(opts.AbsTol, order, opts.continuous, nx, n_con, opts.UseAdjoint, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
 
 %% Run appropriate objective evaluation
-errs = computeError(m, con, obj, opts);
+if nargout >= 2
+    [errs, derrsdT] = computeError(m, con, obj, opts);
+else
+    errs = computeError(m, con, obj, opts);
+end
+
