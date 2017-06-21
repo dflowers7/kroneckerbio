@@ -15,7 +15,9 @@ function [continuous complex tGet] = fixIntegrationType(con, obj)
 % This work is released under the MIT license.
 
 % Constants
-[nObj nCon nTop] = size(obj);
+nObj = size(obj,1);
+nTop = 1; % Currently multiple topologies are not supported
+nCon = numel(con);
 
 % Initialize
 continuous = false(nCon,nTop);

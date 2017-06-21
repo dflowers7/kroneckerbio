@@ -41,13 +41,27 @@ end
 function testSimulateSelectSimple(a)
 [m, con, ~, opts] = simple_model();
 
-obs = observationSelect([2,4]);
+tget = 0:0.15:4.05; % Want to test when t_get and discontinuities don't always align
+obs = observationSelect(tget);
 
-sim = SimulateSystem(m, con, obs, opts);
+opts.Integrator = 'sundials';
+sim_sundials = SimulateSystem(m, con, obs, opts);
 
-a.verifyEqual(size(sim.x), [m.nx,2])
-a.verifyEqual(size(sim.u), [m.nu,2])
-a.verifyEqual(size(sim.y), [m.ny,2])
+nt = length(tget);
+a.verifyEqual(size(sim_sundials.x), [m.nx,nt])
+a.verifyEqual(size(sim_sundials.u), [m.nu,nt])
+a.verifyEqual(size(sim_sundials.y), [m.ny,nt])
+
+opts.Integrator = 'ode15s';
+sim_ode15s = SimulateSystem(m, con, obs, opts);
+
+a.verifyEqual(size(sim_ode15s.x), [m.nx,nt])
+a.verifyEqual(size(sim_ode15s.u), [m.nu,nt])
+a.verifyEqual(size(sim_ode15s.y), [m.ny,nt])
+
+a.verifyEqual(sim_sundials.x, sim_ode15s.x, 'AbsTol', 1e-6, 'RelTol', 1e-4)
+a.verifyEqual(sim_sundials.u, sim_ode15s.u, 'AbsTol', 1e-6, 'RelTol', 1e-4)
+a.verifyEqual(sim_sundials.y, sim_ode15s.y, 'AbsTol', 1e-6, 'RelTol', 1e-4)
 end
 
 function testSimulateSimpleSteadyState(a)

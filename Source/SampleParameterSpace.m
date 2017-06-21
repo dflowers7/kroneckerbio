@@ -87,6 +87,10 @@ function [Ts, data] = SampleParameterSpace(m, con, obj, n, opts)
 %           provided, a different AbsTol will be used for each experiment.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %
 %   This function uses the Metropolis-Hastings algorithm to sample the
 %   parameter space according to the probability given by the objective
@@ -137,6 +141,8 @@ defaultOpts.ObjWeights         = ones(size(obj));
 
 defaultOpts.LowerBound         = 0;
 defaultOpts.UpperBound         = inf;
+
+defaultOpts.TimeoutDuration = [];
 
 defaultOpts.StepsPerCheck      = 100;   % Number of steps between checks on the acceptance rate
 defaultOpts.MaxSampleStep      = 1;     % Uncertainty vectors with 95% CI stetching more than this fold change are truncated

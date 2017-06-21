@@ -22,7 +22,7 @@ atSteadyState = ssvalue == 0;
 % If not at steady state, integrate until at steady state
 if ~atSteadyState
     % Integrate [f; dfdT] over time
-    sol = accumulateOdeFwdSimp(der, jac, 0, inf, ic, con.private.BasalDiscontinuities, 0, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT), [], eve, @(cum_sol)true);
+    sol = accumulateOdeFwdSimp(der, jac, 0, inf, ic, con.private.BasalDiscontinuities, 0, 1:nx, opts.RelTol, opts.AbsTol(1:nx+nx*nT), [], eve, @(cum_sol)true, opts.TimeoutDuration);
     
     % Return steady-state value
     ic = sol.ye;

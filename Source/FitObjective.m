@@ -1,4 +1,4 @@
-function [m, con, G, D] = FitObjective(m, con, obj, opts)
+function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %FitObjective Optimize the parameters of a model to minimize a set of
 %   objective functions
 %
@@ -118,6 +118,59 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           the optimization will run serially. This option has no effect
 %           on global optimization; set opts.GlobalOpts.UseParallel to true
 %           to parallelize global optimization.
+%       .OutputFcn [ function handle {[]} ]
+%           Set to a function handle of the form stop = outfun(x,
+%           optimValues, state). The function is run after each iteration
+%           of the optimization. x are the parameters after the iteration,
+%           optimValues is a struct containing the current iteration's
+%           data, and state is a string describing what the algorithm is
+%           currently doing. stop is a flag that, when set to true, stops
+%           optimization. See the documentation for optimization options
+%           for more details.
+%       .ConstraintObj [ cell vector of objective struct matrices n_obj_constraints by n_con]
+%           If set, the provided objective structs are used as a nonlinear
+%           constraint on the fit. The fit will be constrained to keeping
+%           the objective value less than or equal to opts.ConstraintVal.
+%           This option is only supported for the fmincon solver.
+%       .ConstraintVal [ vector of doubles ]
+%           Set each element of the vector to the upper bound on the
+%           corresponding constraint objective function's value in
+%           opts.ConstraintObj.
+%       .IntegrateFunction
+%       .ObjectiveReductionFunction [ function handle ]
+%           The function, fun(obj,int), has two input arguments: (1) obj,
+%           the objective struct, and (2) int, the integration struct
+%           returned by integrating obj over the model and experiments. It
+%           returns up to two output arguments: (1) the overall objective
+%           value to be minimized, and (2) the gradient of the objective
+%           value with respect to the fit parameters, expressed as a column
+%           vector. The default function sums obj(i).G(int(i)) over i to
+%           calculate the objective value.
+%       .ConstraintIntegrateFunction
+%       .ConstraintReductionFunction
+%       .UseImprovedHessianApprox [ false ]
+%           If set to true, and opts.Algorith is set to 'interior-point',
+%           an improved approximation of the Hessian is used instead of the
+%           default bfgs update. The improved Hessian uses the Fisher
+%           Information Matrix in addition to other optional terms to
+%           approximate the Hessian for least-squares objective functions.
+%       .HessianApproxMaximumConditionNumber [ 1000 ]
+%           If left empty, the default value will be used. Is only used if
+%           .UseImprovedHessianApprox is set to true.
+%       .ApproximateSecondOrderHessianTerm [ true ]
+%           If set to true, a structured BFGS update is used to approximate
+%           the Hessian term corresponding to second derivatives of the
+%           error function of least squares objective functions. This is
+%           only used if .UseImprovedHessianApprox is set to true.
+%       .HessianGuess
+%           'FIM' or 'I' (the default). Only has an effect when the
+%           .Solver option is set to 'sqp'.
+%       .SubproblemAlgorithm
+%           'factorization' or 'cg'
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %       .GlobalOptimization [ logical scalar {false} ]
 %           Use global optimization in addition to fmincon
 %       .GlobalOpts [ options struct scalar {} ]
@@ -134,6 +187,10 @@ function [m, con, G, D] = FitObjective(m, con, obj, opts)
 %           The optimum objective function value
 %       D: [ real vector nT ]
 %           The objective gradient at the optimum parameter set
+%       exitflag [ numeric scalar ]
+%           Indicates why the fit terminated. Values' meanings differ
+%           depending on the fit function used. See documentation for
+%           fmincon and other fitting functions for details.
 
 % (c) 2015 David R Hagen & Bruce Tidor
 % This work is released under the MIT license.
@@ -152,136 +209,13 @@ end
 
 assert(isscalar(m), 'KroneckerBio:FitObjective:MoreThanOneModel', 'The model structure must be scalar')
 
-% Default options
-defaultOpts.Verbose          = 1;
+[m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts);
 
-defaultOpts.RelTol           = [];
-defaultOpts.AbsTol           = [];
-
-defaultOpts.Normalized       = true;
-defaultOpts.UseParams        = 1:m.nk;
-defaultOpts.UseSeeds         = [];
-defaultOpts.UseInputControls = [];
-defaultOpts.UseDoseControls  = [];
-
-defaultOpts.ObjWeights       = ones(size(obj));
-
-defaultOpts.UseAdjoint       = true;
-
-defaultOpts.LowerBound       = 0;
-defaultOpts.UpperBound       = inf;
-defaultOpts.Aeq              = [];
-defaultOpts.beq              = [];
-defaultOpts.TolOptim         = 1e-5;
-defaultOpts.Restart          = 0;
-defaultOpts.RestartJump      = 0.001;
-defaultOpts.TerminalObj      = -inf;
-
-defaultOpts.MaxStepSize      = 1;
-defaultOpts.Algorithm        = 'active-set';
-defaultOpts.MaxIter          = 1000;
-defaultOpts.MaxFunEvals      = 5000;
-
-defaultOpts.ParallelizeExperiments = false;
-
-defaultOpts.GlobalOptimization = false;
-defaultOpts.GlobalOpts         = [];
-
-% Global fit default options
-defaultGlobalOpts.Algorithm = 'globalsearch';
-defaultGlobalOpts.StartPointsToRun = 'bounds-ineqs';
-defaultGlobalOpts.nStartPoints = 10;
-defaultGlobalOpts.UseParallel = false;
-defaultGlobalOpts.MaxIter = 1000; % for pattern search; fix to better default
-
-% Assign default values and make final options structs
-opts = mergestruct(defaultOpts, opts);
-opts.GlobalOpts = mergestruct(defaultGlobalOpts, opts.GlobalOpts);
-
-verbose = logical(opts.Verbose);
-opts.Verbose = max(opts.Verbose-1,0);
-
-% Check for global optimization toolbox only if global optimization is specified
-%   Note: this isn't necesssary for all global optimization methods, but we depend
-%   on this functionality for the current implementation
-if opts.GlobalOptimization
-    assert(logical(license('test','gads_toolbox')), 'KroneckerBio:FitObjective:GlobalOptimizationToolboxMissing', 'Global optimization requires the global optimization (gads) toolbox.')
-end
-
-% Constants
-nx = m.nx;
-nk = m.nk;
-ns = m.ns;
-
-% Ensure structures are proper sizes
-[con, n_con] = fixCondition(con);
-[obj, n_obj] = fixObjective(obj, n_con);
-
-% Ensure UseParams is logical vector
-[opts.UseParams, nTk] = fixUseParams(opts.UseParams, nk);
-
-% Ensure UseSeeds is a logical matrix
-[opts.UseSeeds, nTs] = fixUseSeeds(opts.UseSeeds, ns, n_con);
-
-% Ensure UseControls is a cell vector of logical vectors
-[opts.UseInputControls, nTq] = fixUseControls(opts.UseInputControls, n_con, cat(1,con.nq));
-[opts.UseDoseControls, nTh] = fixUseControls(opts.UseDoseControls, n_con, cat(1,con.nh));
-
-nT = nTk + nTs + nTq + nTh;
-
-% Ensure Restart is a positive integer
-if ~(opts.Restart >= 0)
-    opts.Restart = 0;
-    warning('KroneckerBio:FitObjective:NegativeRestart', 'opts.Restart was not nonegative. It has been set to 0.')
-end
-
-if ~(opts.Restart == floor(opts.Restart))
-    opts.Restart = floor(opts.Restart);
-    warning('KroneckerBio:FitObjective:NonintegerRestart', 'opts.Restart was not a whole number. It has been floored.')
-end
-
-% Ensure RestartJump is a function handle
-if isnumeric(opts.RestartJump)
-    opts.RestartJump = @(iter,G)(opts.RestartJump);
-end
-
-% Construct starting variable parameter set
-T0 = collectActiveParameters(m, con, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-
-% Fix integration type
-[opts.continuous, opts.complex, opts.tGet] = fixIntegrationType(con, obj);
-
-% RelTol
-opts.RelTol = fixRelTol(opts.RelTol);
-
-% Fix AbsTol to be a cell array of vectors appropriate to the problem
-opts.AbsTol = fixAbsTol(opts.AbsTol, 2, opts.continuous, nx, n_con, opts.UseAdjoint, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-
-% Bounds
-opts.LowerBound = fixBounds(opts.LowerBound, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-opts.UpperBound = fixBounds(opts.UpperBound, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-
-%% Options structure for integration
-intOpts = opts;
-
-%% Local optimization options
-localOpts = optimoptions('fmincon');
-localOpts.Algorithm               = opts.Algorithm;
-localOpts.TolFun                  = opts.TolOptim;
-localOpts.TolX                    = 0;
-localOpts.OutputFcn               = @isTerminalObj;
-localOpts.GradObj                 = 'on';
-localOpts.Hessian                 = 'off'; % unused
-localOpts.MaxFunEvals             = opts.MaxFunEvals;
-localOpts.MaxIter                 = opts.MaxIter;
-localOpts.RelLineSrchBnd          = opts.MaxStepSize;
-localOpts.RelLineSrchBndDuration  = Inf;
-localOpts.TolCon                  = 1e-6;
-
-if verbose
-    localOpts.Display = 'iter';
-else
-    localOpts.Display = 'off';
+% Normalize parameters and bounds
+if opts.Normalized
+    opts.LowerBound = log(opts.LowerBound);
+    opts.UpperBound = log(opts.UpperBound);
+    T0 = log(T0);
 end
 
 %% Global optimization options
@@ -293,23 +227,40 @@ if strcmpi(globalOpts.Algorithm, 'multistart') && globalOpts.UseParallel
     warning('KroneckerBio:FitObjective:InvalidMultistartOpts', 'Using multistart with UseParallel is not supported at this time (due to global variable in obj fun usage).')
 end
 
-%% Normalize parameters
-if opts.Normalized
-    % Normalize starting parameters and bounds
-    T0 = log(T0);
-    opts.LowerBound = log(opts.LowerBound);
-    opts.UpperBound = log(opts.UpperBound);
-    
-    % Change relative line search bound to an absolute scale in log space
-    % Because fmincon lacks an absolute option, this hack circumvents that
-    localOpts.TypicalX = zeros(nT,1) + log(1 + opts.MaxStepSize)*log(realmax);
-    localOpts.RelLineSrchBnd = 1 / log(realmax);
+%% Generate objective and constraint functions
+
+% Generate the objective and constraint functions
+% TODO: set up adjoint integration function
+% Fix global optimization (currently untested)
+[objective,constraint,hessian,outfun] = GenerateObjective(m, con, obj, opts, ...
+    opts.IntegrateFunction, opts.ObjectiveReductionFunction, ...
+    opts.ConstraintIntegrateFunction, opts.ConstraintReductionFunction, ...
+    funopts, localOpts.OutputFcn);
+
+switch opts.HessianGuess
+    case 'I'
+        localOpts = struct(localOpts);
+        localOpts.HessMatrix = eye(nT);
+    case 'FIM'
+        localOpts = struct(localOpts);
+        if isempty(constraint)
+            temp1 = [];
+        else
+            [temp1,~,temp2,~] = constraint(T0);
+        end
+        FIM = hessian(T0, zeros(numel(temp1),1));
+        localOpts.HessMatrix = FIM;
 end
 
-%% Apply bounds to starting parameters before optimizing
-% fmincon will choose a wierd value if a starting parameter is outside the bounds
-T0(T0 < opts.LowerBound) = opts.LowerBound(T0 < opts.LowerBound);
-T0(T0 > opts.UpperBound) = opts.UpperBound(T0 > opts.UpperBound);
+if opts.UseImprovedHessianApprox
+    switch opts.Algorithm
+        case 'sqp'
+            localOpts.HessFun = hessian;
+        otherwise
+            localOpts.HessianFcn = hessian;
+    end
+    localOpts.OutputFcn = outfun;
+end
 
 %% Abort in rare case of no optimization
 if numel(T0) == 0
@@ -323,14 +274,6 @@ That = T0;
 Gbest = inf;
 Tbest = T0;
 
-% Check for parallel toolbox if parallel optimization is specified
-if opts.ParallelizeExperiments && isempty(ver('distcomp'))
-    warning('KroneckerBio:FitObjective:ParallelToolboxMissing', ...
-        ['opts.ParallelizeExperiments requires the Parallel '...
-        'Computing toolbox. Reverting to serial evaluation.'])
-    opts.ParallelizeExperiments = false;
-end
-
 % Disable experiment parallelization if global optimization is desired
 if opts.GlobalOptimization && opts.ParallelizeExperiments
     warning('KroneckerBio:FitObjective:GlobalOptimizationParallelExperimentsNotSupported', ...
@@ -339,87 +282,22 @@ if opts.GlobalOptimization && opts.ParallelizeExperiments
     opts.ParallelizeExperiments = false;
 end
 
-% Initialize a parallel pool, or get the current one.
-% Disable experiment parallelization if no pool can be initialized.
-if opts.ParallelizeExperiments
-    
-    p = gcp();
-    if isempty(p)
-        warning('KroneckerBio:FitObjective:NoParallelPool', ...
-            ['opts.ParallelizeExperiments was set to true, ' ...
-            'but no parallel pool could be initialized. '...
-            'Reverting to serial optimization.']);
-        opts.ParallelizeExperiments = false;
-    else
-        NumWorkers = p.NumWorkers;
-    end
-    
-end
-
-if opts.ParallelizeExperiments
-    % Split experiments into worker groups
-    nCon = numel(con);
-    baseNumPerWorker = floor(nCon/NumWorkers);
-    remainder = nCon - baseNumPerWorker*NumWorkers;
-    numPerWorker = repmat(baseNumPerWorker, NumWorkers, 1);
-    numPerWorker(1:remainder) = numPerWorker(1:remainder) + 1;
-    icon_worker = cell(NumWorkers, 1);
-    endi = 0;
-    for ii = 1:NumWorkers
-        starti = endi+1;
-        endi = sum(numPerWorker(1:ii));
-        icon_worker{ii} = (starti:endi)';
-    end
-    
-    % Determine which parameters are fit by which experiments
-    T_experiment = zeros(nT, 1);
-    T_experiment(1:nTk) = 0;
-    nTs_con = sum(opts.UseSeeds,1);
-    nTq_con = cellfun(@sum, opts.UseInputControls(:)');
-    nTh_con = cellfun(@sum, opts.UseDoseControls(:)');
-    nT_con = {nTs_con, nTq_con, nTh_con};
-    endi = nTk;
-    for i_type = 1:3
-        for j_con = 1:nCon
-            starti = endi + 1;
-            endi = endi + nT_con{i_type}(j_con);
-            T_experiment(starti:endi) = j_con;
-        end
-    end
-    
-    % Generate objective function parts for each worker
-    slave_objectives = cell(1,NumWorkers);
-    for ii = 1:NumWorkers
-        slave_objectives{ii} = generateSlaveObjective(m, con, obj, opts, intOpts, T_experiment, icon_worker{ii});
-    end
-    
-    % Distribute slave objective functions to workers
-    spmd
-        slave_objectives = codistributed(slave_objectives);
-    end
-    
-    fminconObjective = @parallelExperimentObjective;
-    
-else
-    
-    fminconObjective = @serialObjective;
-    
-end
+output = struct;
 
 for iRestart = 1:opts.Restart+1
     % Init abort parameters
     aborted = false;
     Tabort = That;
+    lastT = That;
+    
+    % Create local optimization problem
+    localProblem = createOptimProblem('fmincon', 'objective', objective, ...
+        'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
+        'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
+        'nonlcon', constraint, 'options', localOpts);
     
     % Run specified optimization
     if opts.GlobalOptimization
-        
-        % Create local optimization problem
-        %   Used as a subset/refinement of global optimization
-        localProblem = createOptimProblem('fmincon', 'objective', fminconObjective, ...
-            'x0', That, 'Aeq', opts.Aeq, 'beq', opts.beq, ...
-            'lb', opts.LowerBound, 'ub', opts.UpperBound, ...
-            'options', localOpts);
         
         if opts.Verbose
             fprintf('Beginning global optimization with %s...\n', globalOpts.Algorithm)
@@ -435,7 +313,7 @@ for iRestart = 1:opts.Restart+1
                 [That, G, exitflag] = run(ms, localProblem, globalOpts.nStartPoints);
             case 'patternsearch'
                 psOpts = psoptimset('MaxIter', globalOpts.MaxIter, 'UseParallel', globalOpts.UseParallel);
-                [That, G, exitflag] = patternsearch(fminconObjective, That, [], [], ...
+                [That, G, exitflag] = patternsearch(objective, That, [], [], ...
                     opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, [], psOpts);
             otherwise
                 error('KroneckerBio:FitObjective:InvalidGlobalOptAlgorithm', 'Global optimization algorithm %s not recognized.', globalOpts.Algorithm)
@@ -444,10 +322,25 @@ for iRestart = 1:opts.Restart+1
         [~, D] = fminconObjective(That); % since global solvers don't return gradient at endpoint
         
     else
-        
         if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
-        [That, G, exitflag, ~, ~, D] = fmincon(fminconObjective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, [], localOpts);
-        
+        switch opts.Solver
+            case 'fmincon'
+                %[That, G, exitflag, output, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);
+                [That, G, exitflag, output, ~, D] = fmincon(localProblem);
+            case 'lsqnonlin'
+                [That,G,~,exitflag, output, ~, D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
+            case 'sqp'
+                localProblem.options = localOpts;
+                [That, output, ~, ~, exitflag] = sqp(localProblem);
+                % output(8)  = value of the function at the solution
+                % output(10) = number of function evaluations
+                % output(11) = number of gradient evaluations
+                % output(15) = number of iterations
+                [G,D] = objective(That);
+            otherwise
+                error('KroneckerBio:FitObjective:UnrecognizedSolver', ...
+                    'Unrecognized solver %s', opts.Solver);
+        end
     end
     
     % Check abortion status
@@ -504,181 +397,6 @@ end
 % End of function
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Halt optimization on terminal goal %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    function stop = isTerminalObj(x, optimValues, state)
-        if optimValues.fval  < opts.TerminalObj
-            aborted = true;
-            Tabort = x;
-            stop = true;
-        else
-            stop = false;
-        end
-    end
 
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Serial objective function %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    function [G, D] = serialObjective(T)
-        % Reset answers
-        G = 0;
-        D = zeros(nT,1);
-        
-        % Unnormalize
-        if opts.Normalized
-            T = exp(T);
-        else
-            % If fmincon chooses values that violate the lower bounds, force them to be equal to the lower bounds
-            T(T < opts.LowerBound) = opts.LowerBound(T < opts.LowerBound);
-        end
-        
-        % Update parameter sets
-        [m, con] = updateAll(m, con, T, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-        
-        % Integrate system to get objective function value
-        if nargout == 1
-            G = computeObj(m, con, obj, intOpts);
-        end
-        
-        % Integrate sensitivities or use adjoint to get objective gradient
-        if nargout == 2
-            [G, D] = computeObjGrad(m, con, obj, intOpts);
-        end
-    end
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Master parallel experiment objective function %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    function [G,D] = parallelExperimentObjective(T)
-        
-        if nargout < 2
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_objectives);
-                G_d = this_slave_objective{1}(T);
-            end
-            
-        else
-            
-            spmd
-                this_slave_objective = getLocalPart(slave_objectives);
-                [G_d, D_d] = this_slave_objective{1}(T);
-            end
-           
-            % Sum slave objective function gradients to get total gradient
-            D = zeros(numel(T),1);
-            for wi = 1:NumWorkers
-                D = D + D_d{wi};
-            end
-            
-        end
-        
-        % Sum slave objective function values to get total value
-        G = 0;
-        for wi = 1:NumWorkers
-            G = G + G_d{wi};
-        end
-        
-    end
-
-end
-
-%% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%%%% Slave objective function generator %%%%%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-function objectivefun = generateSlaveObjective(m, con, obj, opts, intOpts, T_experiment, i_cons)
-% T_experiment:
-%   nT-by-1 vector of experiment indices indicating which experiment fits
-%   each parameter. 0 indicates model parameter fit by all experiments.
-% i_cons:
-%   Vector of experimental indices to be simulated by the slave function.
-
-    nT = numel(T_experiment);
-    
-    % If worker has no experiments assigned, assign a 0-valued objective
-    % function to it
-    if isempty(i_cons)
-        % Clear variables to avoid wasting memory in closure
-        clear m con obj opts intOpts T_experiment
-        
-        objectivefun = @emptyobjective;
-        
-        return
-    end
-
-    % Get information on which parameters need to be used for the worker's
-    % experiments
-    TisWorker = T_experiment == 0 | any(bsxfun(@eq, T_experiment, i_cons(:)'), 2);
-
-    % Filter down input arguments to those relevant to the worker
-    con = con(i_cons);
-    obj = obj(:, i_cons);
-    opts.UseSeeds = opts.UseSeeds(:,i_cons);
-    opts.UseInputControls = opts.UseInputControls(i_cons);
-    opts.UseDoseControls = opts.UseDoseControls(i_cons);
-    opts.ObjWeights = opts.ObjWeights(:,i_cons);
-    if iscell(opts.AbsTol)
-        opts.AbsTol = opts.AbsTol(i_cons);
-    end
-    opts.LowerBound = opts.LowerBound(TisWorker);
-    opts.UpperBound = opts.UpperBound(TisWorker);
-    intOpts.UseSeeds = intOpts.UseSeeds(:,i_cons);
-    intOpts.UseInputControls = intOpts.UseInputControls(i_cons);
-    intOpts.UseDoseControls = intOpts.UseDoseControls(i_cons);
-    intOpts.ObjWeights = intOpts.ObjWeights(:,i_cons);
-    if iscell(intOpts.AbsTol)
-        intOpts.AbsTol = intOpts.AbsTol(i_cons);
-    end
-    intOpts.LowerBound = intOpts.LowerBound(TisWorker);
-    intOpts.UpperBound = intOpts.UpperBound(TisWorker);
-    
-    % Return worker-specific objective function
-    objectivefun = @objective;
-
-    function [G, D] = objective(T)
-    % Slave objective function
-        
-        % Get portion of T that is relevant to the worker
-        T_worker = T(TisWorker);
-        
-        % Reset answers
-        G = 0;
-        D_worker = zeros(numel(T_worker),1);
-        
-        % Unnormalize
-        if opts.Normalized
-            T_worker = exp(T_worker);
-        else
-            % If fmincon chooses values that violate the lower bounds, force them to be equal to the lower bounds
-            T_worker(T_worker < opts.LowerBound) = opts.LowerBound(T_worker < opts.LowerBound);
-        end
-        
-        % Update parameter sets
-        [m, con] = updateAll(m, con, T_worker, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-        
-        % Integrate system to get objective function value
-        if nargout <= 1
-            G = computeObj(m, con, obj, intOpts);
-        end
-        
-        % Integrate sensitivities or use adjoint to get objective gradient
-        if nargout == 2
-            [G, D_worker] = computeObjGrad(m, con, obj, intOpts);
-        end
-        
-        % Assign back to vector sized for all workers
-        D = zeros(nT, 1);
-        D(TisWorker) = D_worker;
-    end
-
-    function [G, D] = emptyobjective(T)
-        % Function to use if worker has no experiments assigned to it
-        G = 0;
-        D = zeros(nT, 1);
-    end
 
 end

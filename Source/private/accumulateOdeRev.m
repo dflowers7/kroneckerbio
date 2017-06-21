@@ -1,4 +1,4 @@
-function cum_sol = accumulateOdeRev(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events)
+function cum_sol = accumulateOdeRev(der, jac, t0, tF, ic, discontinuities, nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events, timeoutdurationinsec)
 % function cumSol = accumulateOdeRev(der, jac, t0, tF, ic, u, discontinuities,
 % nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events)
 
@@ -7,14 +7,17 @@ function cum_sol = accumulateOdeRev(der, jac, t0, tF, ic, discontinuities, nonne
 
 %% Work-up
 % Clean up inputs
-if nargin < 13
-    n_events = [];
-    if nargin < 12
-        t_first_event = [];
-        if nargin < 11
-            events = [];
-            if nargin < 10
-                delta = [];
+if nargin < 14
+    timeoutdurationinsec = [];
+    if nargin < 13
+        n_events = [];
+        if nargin < 12
+            t_first_event = [];
+            if nargin < 11
+                events = [];
+                if nargin < 10
+                    delta = [];
+                end
             end
         end
     end
@@ -43,6 +46,9 @@ N = numel(discontinuities);
 sim_opts = odeset('Jacobian', jac, 'AbsTol', AbsTol, 'RelTol', RelTol, 'NonNegative', nonnegative);
 if ~isempty(events)
     sim_opts.Events = events;
+end
+if ~isempty(timeoutdurationinsec)
+    sim_opts.OutputFcn = timeoutOutputFunction(timeoutdurationinsec);
 end
 
 %% Initialize variables

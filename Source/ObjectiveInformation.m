@@ -56,6 +56,10 @@ function [F, All] = ObjectiveInformation(m, con, obj, opts, dxdTSol)
 %           provided, a different AbsTol will be used for each experiment.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %   dxdTSol: [ sensitivity solution struct vector nCon {} ]
 %       A structure vector containing the solution to the model
 %       sensitivities under each condition can be provided to prevent this
@@ -104,6 +108,8 @@ defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
 
 defaultOpts.Normalized     = true;
+
+defaultOpts.TimeoutDuration = [];
 
 opts = mergestruct(defaultOpts, opts);
 
@@ -165,10 +171,10 @@ for i_con = 1:n_con
     inT = nTk + inTs + inTq + inTh;
     
     % Sensitivity integration if not provided
-    if isempty(dxdTSol) || isempty(dxdTSol{iCon})
+    if isempty(dxdTSol) || isempty(dxdTSol{i_con})
         ints = integrateAllSens(m, con(i_con), obj(:,i_con), opts_i);
     else
-        ints = dxdTSol{iCon};
+        ints = dxdTSol{i_con};
     end
     
     % Sum all FIMs as computed by each objective function

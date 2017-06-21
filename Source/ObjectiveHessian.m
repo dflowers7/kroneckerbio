@@ -46,6 +46,10 @@ function H = ObjectiveHessian(m, con, obj, opts)
 %           provided, a different AbsTol will be used for each experiment.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %
 %   Outputs
 %       H: [ real vector nT ]
@@ -76,6 +80,10 @@ defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
 
 defaultOpts.ObjWeights       = ones(size(obj));
+
+defaultOpts.UseAdjoint       = false;
+
+defaultOpts.TimeoutDuration = [];
 
 opts = mergestruct(defaultOpts, opts);
 

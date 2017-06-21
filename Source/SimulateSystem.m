@@ -29,6 +29,17 @@ function sim = SimulateSystem(m, con, obs, opts)
 %       .Verbose [ nonnegative integer scalar ]
 %           Default = 1
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
+%       .Integrator [ string ]
+%           Default = '' (uses ode15s) 
+%           Integrator to use. If set to 'sundials', CVODES through
+%           sundialsTB will be used as the integrator for select
+%           observations only; ode15s will be used for other observations.
+%           Any other string (including the empty string) sets ode15s as
+%           the integrator.
 %
 %   Outputs
 %   sim: [ simulation struct matrix size(obs) ]
@@ -84,6 +95,9 @@ defaultOpts.Verbose = 1;
 
 defaultOpts.RelTol  = [];
 defaultOpts.AbsTol  = [];
+defaultOpts.Integrator = '';
+
+defaultOpts.TimeoutDuration = [];
 
 opts = mergestruct(defaultOpts, opts);
 
@@ -102,6 +116,9 @@ opts.RelTol = fixRelTol(opts.RelTol);
 
 % Fix AbsTol to be a cell array of vectors appropriate to the problem
 opts.AbsTol = fixAbsTol(opts.AbsTol, 1, false(n_con,1), nx, n_con);
+
+% Fix observations
+obs = fixObservation(obs, n_con);
 
 %% Run integration for the experiment
 sim = emptystruct([n_obs,n_con]);

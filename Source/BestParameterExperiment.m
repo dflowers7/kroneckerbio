@@ -86,6 +86,10 @@ function [best, data] = BestParameterExperiment(m, con, obj, con_pos, obs_pos, g
 %           Determines if experiments are allowed to be repeated
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %   F: [ matrix nT by nT {} ]
 %       The Fisher information for the known data can be supplied so that
 %       this function will not recalculate it
@@ -148,6 +152,8 @@ defaultOpts.Budget          = inf;
 defaultOpts.MaxGreedyBudget = inf;      % Amount of budget to consider in a single step. Inf = not greedy
 defaultOpts.TerminalGoal    = -inf;
 defaultOpts.AllowRepeats    = true;
+
+defaultOpts.TimeoutDuration = [];
 
 opts = mergestruct(defaultOpts, opts);
 

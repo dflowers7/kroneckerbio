@@ -1,4 +1,4 @@
-function cum_sol = accumulateOdeRevSelect(der, jac, t0, tF, ic, discontinuities, t_get, nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events)
+function cum_sol = accumulateOdeRevSelect(der, jac, t0, tF, ic, discontinuities, t_get, nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events, timeoutdurationinsec)
 % function cumSol = accumulateOdeRevSelect(der, jac, t0, tF, ic, u, discontinuities,
 % t_get, nonnegative, RelTol, AbsTol, delta, events, t_first_event, n_events)
 
@@ -7,14 +7,17 @@ function cum_sol = accumulateOdeRevSelect(der, jac, t0, tF, ic, discontinuities,
 
 %% Work-up
 % Clean up inputs
-if nargin < 14
-    n_events = [];
-    if nargin < 13
-        t_first_event = [];
-        if nargin < 12
-            events = [];
-            if nargin < 11
-                delta = [];
+if nargin < 15
+    timeoutdurationinsec = [];
+    if nargin < 14
+        n_events = [];
+        if nargin < 13
+            t_first_event = [];
+            if nargin < 12
+                events = [];
+                if nargin < 11
+                    delta = [];
+                end
             end
         end
     end
@@ -46,6 +49,9 @@ N = numel(discontinuities);
 sim_opts = odeset('Jacobian', jac, 'AbsTol', AbsTol, 'RelTol', RelTol, 'NonNegative', nonnegative);
 if ~isempty(events)
     sim_opts.Events = events;
+end
+if ~isempty(timeoutdurationinsec)
+    sim_opts.OutputFcn = timeoutOutputFunction(timeoutdurationinsec);
 end
 
 %% Initialize variables
@@ -120,7 +126,8 @@ for k = 1:(N-1)
         end
         
         % Check if integration failed when it shouldn't have
-        if ~isempty(events) && isempty(sim_sol.ie) && sim_sol.x(end) ~= t_int(2)
+        eventOccurred = ~isempty(events) && ~isempty(sim_sol.ie);
+        if ~eventOccurred && sim_sol.x(end) ~= t_int(2)
             try evalin('caller', 'm_k = m.k; m_s = m.s; m_q = m.q; save(''odefail.mat'',''m_k'',''m_s'',''m_q'',''con'')'); end
             error('KroneckerBio:accumulateOde:IntegrationFailure', 'Did not integrate through entire interval!');
         end

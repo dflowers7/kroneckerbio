@@ -1,4 +1,4 @@
-function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints)
+function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con, opts, tF, nExperiments, nTotalDataPoints, nConstraints, outputsToExclude)
 % Generate random experiments for testing objective-based Kronecker
 % functions with multiple experiments
 % 
@@ -13,11 +13,25 @@ function [obj, opts, mVariant, conVariant] = randomExperimentFittingData(m, con,
 % experiments used to generate the data in mVariant and conVariant,
 % respectively.
 %
+% Provide a vector of output indices in outputsToExclude to exclude them
+% from being chosen to fit.
+%
 % Warning: AbsTol is set to default value of 1e-9 no matter what to avoid
 % dealing with standardization, which is complicated.
 %
 % (c) 2016 David Flowers
 % This work is released under the MIT license.
+
+if nargin < 8
+    outputsToExclude = [];
+    if nargin < 7
+        nConstraints = [];
+    end
+end
+
+if isempty(nConstraints)
+    nConstraints = 0;
+end
 
 % Input checks
 assert(isscalar(con), 'con must be a scalar.')
@@ -133,7 +147,9 @@ end
 % Determine random time points, experiments, and outputs for the objective
 % function
 timelist = tF*rand(nTotalDataPoints, 1);
-outputlist = randi(m.ny, nTotalDataPoints, 1);
+outputlist = randi(m.ny-numel(outputsToExclude), nTotalDataPoints, 1);
+possibleOutputs = setdiff(1:m.ny, outputsToExclude);
+outputlist = possibleOutputs(outputlist);
 experimentlist = randi(nExperiments, nTotalDataPoints, 1);
 
 sd = sdLinear(0.1, 0.01);
@@ -157,6 +173,47 @@ measurements = {sim.measurements};
 obj = objectiveZero([nExperiments nExperiments]);
 for ei = nExperiments:-1:1
     obj(ei,ei) = obs(ei).Objective(measurements{ei});
+end
+
+% Determine random time points, experiments, and outputs for the constraint
+% functions
+obj_c = objectiveZero(0);
+for i = nConstraints:-1:1
+    timelist_c = tF*rand(1, 1);
+    outputlist_c = randi(m.ny, 1, 1);
+    experimentlist_c = randi(nExperiments, 1, 1);
+    
+    sd_c = sdLinear(0.1, 0.01);
+    
+    % Get observations
+    for ei = nExperiments:-1:1
+        isExperiment = experimentlist_c == ei;
+        if any(isExperiment)
+            obs_c(ei) = observationLinearWeightedSumOfSquares(...
+                outputlist_c(isExperiment),...
+                timelist_c(isExperiment),...
+                sd_c,...
+                sprintf('Experiment %d constraint', ei));
+        else
+            obs_c(ei) = observationZero(1);
+        end
+    end
+    
+    % Simulate new experiments to get constraint values
+    sim = SimulateSystem(mVariant, conVariant, obs_c, opts);
+    measurements = {sim.measurements};
+    
+    % Create objective functions for constraints
+    obj_c = objectiveZero([nExperiments nExperiments]);
+    for ei = nExperiments:-1:1
+        % Add thirty percent to the value to ensure the constraint can be
+        % reasonably met
+        obj_c(ei,ei) = obs_c(ei).Objective(measurements{ei}*1.3);
+    end
+    
+    % Add objective functions to opts
+    opts.ConstraintObj{i} = obj_c;
+    opts.ConstraintVal(i) = chi2inv(0.95, 1);
 end
 
 end

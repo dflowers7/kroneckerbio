@@ -8,16 +8,22 @@ u = con.u;
 
 % Construct system
 [der, jac, del] = constructSystem();
+order = 0;
 
-if ~con.SteadyState
-    order = 0;
-    ic = extractICs(m,con,opts,order);
-else
+% Only simulate to steady state if there are requested points or the final
+% simulation time is greater than zero (final simulation time condition is
+% for the case when event finding is desired)
+integrationperformed = ~isempty(t_get) || tF > 0;
+if con.SteadyState && integrationperformed
     ic = steadystateSys(m, con, opts);
+else
+    ic = extractICs(m,con,opts,order);
 end
 
 % Integrate f over time
-sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin);
+% If no requested points, an empty sol should be returned without
+% performing any integration
+sol = accumulateOdeFwdSimp(der, jac, 0, tF, ic, con.Discontinuities, t_get, 1:nx, opts.RelTol, opts.AbsTol(1:nx), del, eve, fin, opts.TimeoutDuration);
 
 % Work down
 int.Type = 'Integration.System.Simple';
@@ -44,9 +50,11 @@ int.h = con.h;
 int.dydx = m.dydx;
 int.dydu = m.dydu;
 
+%if integrationperformed
 int.t = sol.x;
 int.x = sol.y;
 int.u = con.u(int.t);
+
 int.y = y(int.t, int.x, int.u);
 
 int.ie = sol.ie;
@@ -56,6 +64,21 @@ int.ue = u(int.te);
 int.ye = y(int.te, int.xe, int.ue);
 
 int.sol = sol;
+% else
+%     int.t = zeros(1,0);
+%     int.x = zeros(nx,0);
+%     int.u = zeros(m.nu,0);
+%     
+%     int.y = zeros(m.ny,0);
+%     
+%     int.ie = [];
+%     int.te = zeros(1,0);
+%     int.xe = zeros(nx,0);
+%     int.ue = zeros(m.nu,0);
+%     int.ye = zeros(m.ny,0);
+%     
+%     int.sol = [];
+% end
 
 % End of function
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

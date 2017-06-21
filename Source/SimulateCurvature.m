@@ -40,6 +40,10 @@ function sim = SimulateCurvature(m, con, obs, opts)
 %           provided, a different AbsTol will be used for each experiment.
 %       .Verbose [ nonnegative integer scalar {1} ]
 %           Bigger number displays more progress information
+%       .TimeoutDuration [ nonnegative scalar {[]} ]
+%           Sets an upper limit to the amount of time an integration may
+%           take. Any integration taking longer than this throws an error.
+%           If empty (the default), no upper limit is set.
 %
 %   Outputs
 %   SimulateCurvature(m, con, opts)
@@ -105,13 +109,16 @@ defaultOpts.UseSeeds         = [];
 defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
 
+defaultOpts.TimeoutDuration = [];
+
 opts = mergestruct(defaultOpts, opts);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
 
-% Constants
+% Constants'
 nx = m.nx;
+ns = m.ns;
 nk = m.nk;
 ns = m.ns;
 

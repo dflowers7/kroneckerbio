@@ -19,7 +19,7 @@ l = numel(bounds);
 if l == 1
     bounds = zeros(nT,1) + bounds;
 elseif l == nk+ns*nCon+nq+nh
-    bounds = bounds([UseParams; vec(UseSeeds); cat(1,UseInputControls{:})]);
+    bounds = bounds([UseParams; vec(UseSeeds); cat(1,UseInputControls{:}); cat(1,UseDoseControls{:})]);
 elseif l == nT
     %bounds = bounds;
 elseif l == nk && nTs == 0 && nTq == 0 && nTh == 0

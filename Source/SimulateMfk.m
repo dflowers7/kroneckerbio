@@ -28,6 +28,8 @@ defaultOpts.AbsTol         = NaN;
 defaultOpts.UseModelICs    = false;
 defaultOpts.UseModelInputs = false;
 
+defaultOpts.TimeoutDuration = [];
+
 defaultOpts.V0             = zeros(m.nx);
 
 opts = mergestruct(defaultOpts, opts);
