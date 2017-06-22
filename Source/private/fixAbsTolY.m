@@ -6,9 +6,6 @@ if nargin > 2
     nTq = sum(cat(1, UseInputControls{:}));
     nTh = sum(cat(1, UseDoseControls{:}));
     nT = nTk + nTs + nTq + nTh;
-    sensitivities = true;
-else
-    sensitivities = false;
 end
 
 defaultVal = Inf;
@@ -23,16 +20,26 @@ if isscalar(AbsTolY)
     AbsTolY = repmat(AbsTolY, ny, 1);
 end
 
-if numel(AbsTolY) == ny && sensitivities
-    AbsTolY = [AbsTolY; repmat(defaultVal, ny*nT.^derorder, 1)];
+if numel(AbsTolY) == ny && derorder >= 1
+    AbsTolY = [AbsTolY; repmat(defaultVal, ny*nT, 1)];
+end
+if numel(AbsTolY) == ny + ny*nT && derorder >= 2
+    AbsTolY = [AbsTolY; repmat(defaultVal, ny*nT*nT, 1)];
 end
 
-if sensitivities
-    assert(numel(AbsTolY) == ny+ny*nT, 'KroneckerBio:fixAbsTolY:AbsTolYSize', ...
-        'AbsTolY must be empty, a scalar, length ny, or length ny+ny*nT.^(derivative order).')
-else
-    assert(numel(AbsTolY) == ny, 'KroneckerBio:fixAbsTolY:AbsTolYSize', ...
-        'AbsTolY must be empty, a scalar, or of length ny.')
+switch derorder
+case 0
+    nAbsTols = ny;
+    nAbsTolStr = '';
+case 1
+    nAbsTols = ny + ny*nT;
+    nAbsTolStr = ', ny+ny*nT';
+case 2
+    nAbsTols = ny + ny*nT + ny*nT*nT;
+    nAbsTolStr = ', ny+ny*nT, ny+ny*nT+ny*nT*nT';
 end
+
+assert(numel(AbsTolY) == nAbsTols, 'KroneckerBio:fixAbsTolY:AbsTolYSize', ...
+    'AbsTolY must be one of the following lengths: 0, 1, ny%s.', nAbsTolStr)
 
 end

@@ -6,24 +6,9 @@ function [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, 
 %       inputting into GenerateObjective().
 
 % Default options
-defaultOpts.Verbose          = 1;
-
-defaultOpts.RelTol           = [];
-defaultOpts.AbsTol           = [];
-defaultOpts.AbsTolY          = [];
-defaultOpts.RelTolY          = [];
-
-defaultOpts.Normalized       = true;
-defaultOpts.UseParams        = 1:m.nk;
-defaultOpts.UseSeeds         = [];
-defaultOpts.UseInputControls = [];
 defaultOpts.UseDoseControls  = [];
 
 defaultOpts.ObjWeights       = ones(size(obj));
-
-defaultOpts.UseAdjoint       = false;
-% May need a more detailed treatment here later
-defaultOpts.AdjointOutputSensitivities = false(m.ny,1);
 
 defaultOpts.LowerBound       = 0;
 defaultOpts.UpperBound       = inf;
@@ -45,8 +30,6 @@ defaultOpts.MaxIter          = 1000;
 defaultOpts.MaxFunEvals      = 5000;
 
 defaultOpts.OutputFcn              = [];
-defaultOpts.ParallelizeExperiments = false;
-defaultOpts.TimeoutDuration = [];
 
 defaultOpts.ConstraintObj    = {};
 defaultOpts.ConstraintVal    = [];
@@ -64,7 +47,7 @@ defaultOpts.HessianApproximation = 'bfgs';
 defaultOpts.SubproblemAlgorithm = 'factorization';
 defaultOpts.HessianGuess = 'I';
 
-defaultOpts.Integrator = '';
+defaultOpts.UseAdjoint = false;
 
 defaultOpts.GlobalOptimization = false;
 defaultOpts.GlobalOpts         = [];
@@ -80,8 +63,21 @@ defaultGlobalOpts.MaxIter = 1000; % for pattern search; fix to better default
 opts = mergestruct(defaultOpts, opts);
 opts.GlobalOpts = mergestruct(defaultGlobalOpts, opts.GlobalOpts);
 
-verbose = logical(opts.Verbose);
-opts.Verbose = max(opts.Verbose-1,0);
+% Fix AbsTol to be a cell array of vectors appropriate to the problem
+if opts.UseAdjoint
+    warning('UseAdjoint is currently not implemented in this version of FitObjective. Switching to false...')
+    opts.UseAdjoint = false;
+end
+if strcmp(opts.Solver, 'lsqnonlin') && opts.UseAdjoint
+    warning('KroneckerBio:FitObjective:AdjointNotSupportedForLsqnonlin', ...
+        'Adjoint method currently not supported for lsqnonlin. Switching to forward method...')
+    opts.UseAdjoint = false;
+end
+
+% Fix simulation options after doing the above to account for any changes
+% to UseAdjoint and its effects on AbsTol
+derorder = 1;
+opts = FixSimulationOpts(m, con, obj, opts, derorder);
 
 % Check for global optimization toolbox only if global optimization is specified
 %   Note: this isn't necesssary for all global optimization methods, but we depend
@@ -89,7 +85,6 @@ opts.Verbose = max(opts.Verbose-1,0);
 if opts.GlobalOptimization
     assert(logical(license('test','gads_toolbox')), 'KroneckerBio:FitObjective:GlobalOptimizationToolboxMissing', 'Global optimization requires the global optimization (gads) toolbox.')
 end
-
 
 % Constants
 nx = m.nx;
@@ -130,27 +125,6 @@ end
 if isnumeric(opts.RestartJump)
     opts.RestartJump = @(iter,G)(opts.RestartJump);
 end
-
-% Fix integration type
-[opts.continuous, opts.complex, opts.tGet] = fixIntegrationType(con, obj);
-
-% RelTol
-opts.RelTol = fixRelTol(opts.RelTol);
-opts.RelTolY = fixRelTolY(opts.RelTolY);
-
-% Fix AbsTol to be a cell array of vectors appropriate to the problem
-if opts.UseAdjoint
-    warning('UseAdjoint is currently not implemented in this version of FitObjective. Switching to false...')
-    opts.UseAdjoint = false;
-end
-if strcmp(opts.Solver, 'lsqnonlin') && opts.UseAdjoint
-    warning('KroneckerBio:FitObjective:AdjointNotSupportedForLsqnonlin', ...
-        'Adjoint method currently not supported for lsqnonlin. Switching to forward method...')
-    opts.UseAdjoint = false;
-end
-opts.AbsTol = fixAbsTol(opts.AbsTol, 2, opts.continuous, nx, n_con, opts.UseAdjoint, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-derorder = 1;
-opts.AbsTolY = fixAbsTolY(opts.AbsTolY, ny, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls, derorder);
 
 % Bounds
 opts.LowerBound = fixBounds(opts.LowerBound, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
@@ -219,6 +193,9 @@ end
         lastT = x;
         stop = isTerminalObj(x, optimValues, state);
     end
+
+verbose = logical(opts.Verbose);
+opts.Verbose = max(opts.Verbose-1, 0);
 
 if verbose
     localOpts.Display = 'iter';

@@ -96,61 +96,15 @@ assert(nargin >= 3, 'KroneckerBio:SimulateSensitivity:TooFewInputs', 'SimulateSe
 assert(isscalar(m), 'KroneckerBio:SimulateSensitivity:MoreThanOneModel', 'The model structure must be scalar')
 
 % Default options
-defaultOpts.Verbose          = 1;
-
-defaultOpts.RelTol           = [];
-defaultOpts.AbsTol           = [];
-
-defaultOpts.Normalized       = true;
-defaultOpts.UseParams        = 1:m.nk;
-defaultOpts.UseSeeds         = [];
-defaultOpts.UseInputControls = [];
-defaultOpts.UseDoseControls  = [];
-defaultOpts.AdjointOutputSensitivities = [];
-
-defaultOpts.TimeoutDuration = [];
-
-opts = mergestruct(defaultOpts, opts);
+derorder = 1;
+opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
 
-% Constants
-nx = m.nx;
-nk = m.nk;
-ns = m.ns;
-ny = m.ny;
-
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
 [obs, n_obs] = fixObservation(obs, n_con);
-
-% Ensure UseParams is logical vector
-[opts.UseParams, nTk] = fixUseParams(opts.UseParams, nk);
-
-% Ensure UseSeeds is a logical matrix
-[opts.UseSeeds, nTs] = fixUseSeeds(opts.UseSeeds, ns, n_con);
-
-% Ensure UseControls are cell vectors of logical vectors
-[opts.UseInputControls, nTq] = fixUseControls(opts.UseInputControls, n_con, cat(1,con.nq));
-[opts.UseDoseControls, nTh] = fixUseControls(opts.UseDoseControls, n_con, cat(1,con.nh));
-
-nT = nTk + nTs + nTq + nTh;
-
-% RelTol
-opts.RelTol = fixRelTol(opts.RelTol);
-
-% Fix AbsTol to be a cell array of vectors appropriate to the problem
-opts.AbsTol = fixAbsTol(opts.AbsTol, 2, false(n_con,1), nx, n_con, false, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
-
-derorder = 1;
-opts.AbsTolY = fixAbsTolY(opts.AbsTolY, ny, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls, derorder);
-
-% Fix observations
-obs = fixObservation(con, obs);
-
-% Fix adjoint output sensitivity specification
-opts.AdjointOutputSensitivities = fixAdjointOutputSensitivities(opts.AdjointOutputSensitivities, ny, n_con);
 
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_con]);

@@ -91,34 +91,15 @@ assert(nargin >= 3, 'KroneckerBio:SimulateSystem:TooFewInputs', 'SimulateSystem 
 assert(isscalar(m), 'KroneckerBio:SimulateSystem:MoreThanOneModel', 'The model structure must be scalar')
 
 % Default options
-defaultOpts.Verbose = 1;
-
-defaultOpts.RelTol  = [];
-defaultOpts.AbsTol  = [];
-defaultOpts.Integrator = '';
-
-defaultOpts.TimeoutDuration = [];
-
-opts = mergestruct(defaultOpts, opts);
+derorder = 0;
+opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
 
-% Constants
-nx = m.nx;
-
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
 [obs, n_obs] = fixObservation(obs, n_con);
-
-% RelTol
-opts.RelTol = fixRelTol(opts.RelTol);
-
-% Fix AbsTol to be a cell array of vectors appropriate to the problem
-opts.AbsTol = fixAbsTol(opts.AbsTol, 1, false(n_con,1), nx, n_con);
-
-% Fix observations
-obs = fixObservation(obs, n_con);
 
 %% Run integration for the experiment
 sim = emptystruct([n_obs,n_con]);
