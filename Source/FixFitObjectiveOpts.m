@@ -15,6 +15,7 @@ defaultOpts.UpperBound       = inf;
 defaultOpts.Aeq              = [];
 defaultOpts.beq              = [];
 defaultOpts.TolOptim         = 1e-5;
+defaultOpts.TolX             = 0;
 defaultOpts.Restart          = 0;
 defaultOpts.RestartJump      = 0.001;
 defaultOpts.TerminalObj      = -inf;
@@ -145,7 +146,7 @@ switch opts.Solver
         localOpts = optimoptions(opts.Solver);
 end
 localOpts.TolFun                  = opts.TolOptim;
-localOpts.TolX                    = 0;
+localOpts.TolX                    = opts.TolX;
 localOpts.MaxFunEvals             = opts.MaxFunEvals;
 localOpts.MaxIter                 = opts.MaxIter;
 

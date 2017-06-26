@@ -68,6 +68,9 @@ function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %    	.UseAdjoint [ logical scalar {true} ]
 %           Indicates whether the gradient should be calculated via the
 %           adjoint method or the forward method
+%       .TolX [ positive scalar {0} ]
+%           Tolerance on change in parameter values. If the step size is less
+%           than this value, optimization stops.
 %     	.TolOptim [ positive scalar {1e-5} ]
 %           The objective tolerance. The optimization stops when it is
 %           predicted that the objective function cannot be improved more
