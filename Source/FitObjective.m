@@ -267,7 +267,7 @@ end
 
 %% Abort in rare case of no optimization
 if numel(T0) == 0
-    [G, D] = fminconObjective(T0);
+    [G, D] = objective(T0);
     return
 end
 
