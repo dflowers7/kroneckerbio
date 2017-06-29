@@ -24,8 +24,11 @@ for i_con = 1:n_con
     
     for i_obj = 1:n_obj
         
+        ObjWeight = ints(i_obj,i_con).ObjWeight;
+        
+        
         G_i = obj(i_obj,i_con).G(ints(i_obj,i_con));
-        G = G + ints(i_obj,i_con).ObjWeight * G_i;
+        G = G + ObjWeight * G_i;
         
         if nargout > 1
             D_i = obj(i_obj,i_con).dGdT(ints(i_obj,i_con));
@@ -38,8 +41,9 @@ for i_con = 1:n_con
             D(TisExperiment) = D(TisExperiment) + ints(i_obj,i_con).ObjWeight * D_i;
             
             if nargout > 2 && isPureLeastSquares
-                err_temp = obj(i_obj,i_con).err(ints(i_obj,i_con));
-                derrdT_temp = obj(i_obj,i_con).derrdT(ints(i_obj,i_con));
+                ObjWeight_sqrt = sqrt(ObjWeight);
+                err_temp = ObjWeight_sqrt*obj(i_obj,i_con).err(ints(i_obj,i_con));
+                derrdT_temp = ObjWeight_sqrt*obj(i_obj,i_con).derrdT(ints(i_obj,i_con));
                 if isempty(derrdT_temp) && ~isObjectiveZero(i_obj,i_con)
                     % If any nonzero objective functions do not have a
                     % derrdT field, this isn't a pure least squares, and we

@@ -212,6 +212,12 @@ end
 
 assert(isscalar(m), 'KroneckerBio:FitObjective:MoreThanOneModel', 'The model structure must be scalar')
 
+if isfield(opts, 'Verbose')
+    verbose = opts.Verbose > 0;
+else
+    verbose = true;
+end
+
 [m,con,obj,opts,localOpts,nT,T0,funopts] = FixFitObjectiveOpts(m, con, obj, opts);
 
 % Normalize parameters and bounds
@@ -302,7 +308,7 @@ for iRestart = 1:opts.Restart+1
     % Run specified optimization
     if opts.GlobalOptimization
         
-        if opts.Verbose
+        if verbose
             fprintf('Beginning global optimization with %s...\n', globalOpts.Algorithm)
         end
         
@@ -325,7 +331,7 @@ for iRestart = 1:opts.Restart+1
         [~, D] = fminconObjective(That); % since global solvers don't return gradient at endpoint
         
     else
-        if opts.Verbose; fprintf('Beginning gradient descent...\n'); end
+        if verbose; fprintf('Beginning gradient descent...\n'); end
         switch opts.Solver
             case 'fmincon'
                 %[That, G, exitflag, output, ~, D] = fmincon(objective, That, [], [], opts.Aeq, opts.beq, opts.LowerBound, opts.UpperBound, constraint, localOpts);

@@ -511,7 +511,8 @@ if opts(1)>0
          ban3s=' KTO    max(S)';
       end
    end
-   disp([ban2s ban3s]);
+   ban4s = sprintf('%10s%10s', '|dx|', 'xlim');
+   disp([ban2s ban3s ban4s]);
 end
 
 %%--------------------------------------------------------------------
@@ -531,7 +532,13 @@ while nit<=opts(15)
 %    else
 %        maxstepsize = Inf;
 %    end
-   [s,u,statusqp]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
+    % Adjust max step size
+    if alpha == 1 && steplimitactive
+        maxstepsize = maxstepsize*1.41;
+    elseif alpha <= 0.1
+        maxstepsize = maxstepsize/1.41;
+    end
+   [s,u,statusqp,steplimitactive]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
    delta=0;sHsfail=0;z0p1fail=0;augfail=0;if aug=='f',nAS=0;end;aug='f';
    SCV=sum(abs(g(1:nec)))+sum(max(0,g(nec+1:ncs)));
    %
@@ -577,8 +584,8 @@ while nit<=opts(15)
    while aug=='f' && (delta>=deltaub || z0p1fail || sHsfail)
       while delta>=deltaub && rho<=rhoub
          mod='t'; sHsfail=0;
-         [sdelta,udelta,statusqp]=qp([H zeros(ndv,1);zeros(1,ndv) rho],...
-            [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1);
+         [sdelta,udelta,statusqp,steplimitactive]=qp([H zeros(ndv,1);zeros(1,ndv) rho],...
+            [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1,maxstepsize);
          s=sdelta(1:ndv);u=udelta(1:lenv);
          delta=sdelta(ndv+1);
          statusok = strcmp(statusqp(1:2),'ok');
@@ -598,7 +605,7 @@ while nit<=opts(15)
       if aug=='f' && (sHsfail || delta>deltaub || ~statusok)
          aug='t'; nAS=nAS+1; sHsfail=0; delta=0;
          [z0,z0p1,z0p2,z0p3]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-         [s,u1,statusqp]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1);
+         [s,u1,statusqp,steplimitactive]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
          u=v+z0p3; u([lb ub])=u1;
          if ~(strcmp(statusqp(1:2),'ok') || strcmp(statusqp(1:3),'max'))
             status=['Augmented Lagrangian QP problem is ' statusqp '.'];
@@ -659,24 +666,26 @@ while nit<=opts(15)
    if opts(1)>2,NLGs=num2str(max(abs(NLG)),4);DBDs=num2str(s'*H*s,4);end
    %
    % Display iteration info
-   %  
+   %
+   
    if opts(1)
       if mj>lenv-lenvub, mj=mj-ncs-lenvlb; fs(38)='+';
       elseif mj>ncs, mj=mj-ncs; fs(38)='-';
       else, fs(38)=' ';
       end
+      fs_new = [fs '%10.3g%10.3g'];
       if opts(1)>3 && nit~=1
          disp(['ITERATION ' int2str(nit-1)]);% -1 to match Sch.
          disp([ban2s ban3s]);
       end
       if opts(6)==(-1)
-         disp([sprintf(fs,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO,norm(dx),maxstepsize),trouble]);
       elseif opts(6)==1
-         disp([sprintf(fs,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2,norm(dx),maxstepsize),trouble]);
       elseif opts(6)==2
-         disp([sprintf(fs,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf)),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf),norm(dx),maxstepsize),trouble]);
       else
-         disp([sprintf(fs,nfcn,f0,alpha,NAC,mg,mj,KTO,ms),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,KTO,ms,norm(dx),maxstepsize),trouble]);
       end
       trouble='';
    end
@@ -772,7 +781,7 @@ while nit<=opts(15)
       vlm = guessLM(fp,gp,g,ncs,nec);
       minalpha = min( 1, max( opts(2)/max(abs(s)), alpha ) );
 %     s = qp([],gp*vlm,[],[],slb(1:lenvlb),sub(1:lenvub),s,nec,-1);
-      [s,u1] = qp(eye(ndv)/minalpha,gp*vlm,[],[],slb(ilb),sub(iub),s,nec,-1);
+      [s,u1,~,steplimitactive] = qp(eye(ndv)/minalpha,gp*vlm,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
       [z0,z0p1] = merit(vlm,[],nec,[],g0,[],gp,[],s); % exterior penalty
       if max(abs(s))>eps && z0>eps
          u=[vlm; u1];

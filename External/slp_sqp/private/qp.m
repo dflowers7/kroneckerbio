@@ -1,4 +1,4 @@
-function [s,u,status]=qp(H,fp,A,b,vlb,vub,x0,neq,nomsg,max_s)
+function [s,u,status,steplimitactive]=qp(H,fp,A,b,vlb,vub,x0,neq,nomsg,max_s)
 % QP converts old optimization toolbox qp calling sequence to new quadprog
 % calling sequence in version 2 and later of the optimization toolbox.
 %
@@ -44,7 +44,8 @@ if isempty(max_s)
     A_slim = zeros(0,nx);
     b_slim = zeros(0,1);
 else
-    A_slim = [-eye(nx); eye(nx)];
+    [~,~,V] = svd(H);
+    A_slim = [-V.'; V.'];
     b_slim = repmat(max_s, 2*nx, 1);
 end
 
@@ -81,6 +82,7 @@ if exitflag>=0
    if ~isempty(vlb),            u=[u;LAMBDA.lower(1:length(vlb))]; end
    if ~isempty(vub),            u=[u;LAMBDA.upper(1:length(vub))]; end
 end
+steplimitactive = any(abs(V.'*s) >= 0.999*max_s);
 %%Added -1 conditions to handle MOSEK exitflags
 %  if exitflag==-1
 %     status='ok';

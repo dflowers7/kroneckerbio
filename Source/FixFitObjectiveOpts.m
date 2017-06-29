@@ -41,8 +41,8 @@ defaultOpts.ConstraintIntegrateFunction     = [];
 defaultOpts.ConstraintReductionFunction     = [];
 defaultOpts.ScaleConstraints                = false;
 
-defaultOpts.UseImprovedHessianApprox = false;
-defaultOpts.HessianApproxMaximumConditionNumber = 1000;
+defaultOpts.UseImprovedHessianApprox = true;
+defaultOpts.HessianApproxMaximumConditionNumber = Inf;
 defaultOpts.ApproximateSecondOrderHessianTerm = true;
 defaultOpts.HessianApproximation = 'bfgs';
 defaultOpts.SubproblemAlgorithm = 'factorization';

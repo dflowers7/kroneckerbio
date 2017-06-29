@@ -1,4 +1,4 @@
-function [objfun, constrfun, hessianapproxfun, outfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions, funopts, other_outfun)
+function [objfun, constrfun, hessianapproxfun, outfun, updateoptsfun] = GenerateObjective(m, con, obj, opts, integrateFunctions_objective, objectiveFunction, integrateFunctions_constraint, constraintFunctions, funopts, other_outfun)
 % Input arguments:
 %   m
 %   con
@@ -204,30 +204,34 @@ end
 % Determine which T's are fit by which experiments
 TisExperiment = bsxfun(@(T_experiment,i_con)T_experiment == 0 | T_experiment == i_con, T_experiment, 1:n_con);
 
-% Check for parallel toolbox if parallel optimization is specified
-if opts.ParallelizeExperiments && isempty(ver('distcomp'))
-    warning('KroneckerBio:FitObjective:ParallelToolboxMissing', ...
-        ['opts.ParallelizeExperiments requires the Parallel '...
-        'Computing toolbox. Reverting to serial evaluation.'])
-    opts.ParallelizeExperiments = false;
-end
+initializeParallelPool()
 
-% Determine number of workers in the parallel pool
-if opts.ParallelizeExperiments
-    p = gcp();
-    if isempty(p)
-        warning('KroneckerBio:FitObjective:NoParallelPool', ...
-            ['opts.ParallelizeExperiments was set to true, ' ...
-            'but no parallel pool could be initialized. '...
-            'Reverting to serial optimization.']);
-        opts.ParallelizeExperiments = false;
-        NumWorkers = 1;
-    else
-        NumWorkers = p.NumWorkers;
+    function initializeParallelPool()
+        % Check for parallel toolbox if parallel optimization is specified
+        if opts.ParallelizeExperiments && isempty(ver('distcomp'))
+            warning('KroneckerBio:FitObjective:ParallelToolboxMissing', ...
+                ['opts.ParallelizeExperiments requires the Parallel '...
+                'Computing toolbox. Reverting to serial evaluation.'])
+            opts.ParallelizeExperiments = false;
+        end
+        
+        % Determine number of workers in the parallel pool
+        if opts.ParallelizeExperiments
+            p = gcp();
+            if isempty(p)
+                warning('KroneckerBio:FitObjective:NoParallelPool', ...
+                    ['opts.ParallelizeExperiments was set to true, ' ...
+                    'but no parallel pool could be initialized. '...
+                    'Reverting to serial optimization.']);
+                opts.ParallelizeExperiments = false;
+                NumWorkers = 1;
+            else
+                NumWorkers = p.NumWorkers;
+            end
+        else
+            NumWorkers = 1;
+        end
     end
-else
-    NumWorkers = 1;
-end
 
 % Split experiment indices into worker groups
 baseNumPerWorker = floor(n_con/NumWorkers);
@@ -294,6 +298,7 @@ else
 end
 hessianapproxfun = @hessian_approximation;
 outfun = @outfun_;
+updateoptsfun = @updateOpts;
 
     function int_return = integr(T, integrateFunctions, isobjective_return, index_return)
         
@@ -323,73 +328,123 @@ outfun = @outfun_;
             isobjective = vertcat(int_all(is_int_all).isobjective);
             index = vertcat(int_all(is_int_all).index);
             
-            int_temp = get_memoized_int(T, integrateFunctions{j});
-            if ~isempty(int_temp)
-                int_cell = int_temp;
-                prevint = int_cell;
-                prev_obj_all_cell = cell(numel(index),1);
-                prev_obj_all_cell(isobjective) = {obj};
-                prev_obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
-                prev_index = index;
-                prev_isobjective = isobjective;
-                if timeIntegration
-                    inttime_workers = repmat({0},NumWorkers,1);
-                end
-                continue
-            end
-            
-            % Filter the previous integration struct to those ints
-            % needed for this round of integration
-            if ~isempty(prevint)
-                intstokeep = zeros(numel(index),1);
-                for q = 1:numel(index)
-                    intstokeep(q) = find(index(q) == prev_index & isobjective(q) == prev_isobjective);
-                end
-                assert(numel(intstokeep) == numel(index), 'KroneckerBio:GenerateObjective:PrevIntNotFound', ...
-                    'Some of the ints needed for the next round of integration were not found. This is a bug.')
-                prevint_filtered = prevint(intstokeep);
-                prev_obj_all_cell_filtered = prev_obj_all_cell(intstokeep);
-            end
-            
-            if timeIntegration
-                t_initint = toc(timer_initint);
-                fprintf('Initialization of integration %g took %g seconds\n', j, t_initint)
-            end
-            
-            if opts.ParallelizeExperiments
-                if timeIntegration
-                    timer_spmd = tic;
-                end
-                spmd
-                    if timeIntegration
-                        t_spmd = toc(timer_spmd);
-                        fprintf('Starting spmd block took %g seconds\n', t_spmd)
+            int_cell = get_memoized_int(T, integrateFunctions{j});
+%             if ~isempty(int_temp)
+%                 
+%                 int_cell = int_temp;
+%                 prevint = int_cell;
+%                 prev_obj_all_cell = cell(numel(index),1);
+%                 prev_obj_all_cell(isobjective) = {obj};
+%                 prev_obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
+%                 prev_index = index;
+%                 prev_isobjective = isobjective;
+%                 if timeIntegration
+%                     inttime_workers = repmat({0},NumWorkers,1);
+%                 end
+%                 
+            if isempty(int_cell)
+                
+                % Filter the previous integration struct to those ints
+                % needed for this round of integration
+                if ~isempty(prevint)
+                    intstokeep = zeros(numel(index),1);
+                    for q = 1:numel(index)
+                        intstokeep(q) = find(index(q) == prev_index & isobjective(q) == prev_isobjective);
                     end
+                    assert(numel(intstokeep) == numel(index), 'KroneckerBio:GenerateObjective:PrevIntNotFound', ...
+                        'Some of the ints needed for the next round of integration were not found. This is a bug.')
+                    prevint_filtered = prevint(intstokeep);
+                    prev_obj_all_cell_filtered = prev_obj_all_cell(intstokeep);
+                end
+                
+                if timeIntegration
+                    t_initint = toc(timer_initint);
+                    fprintf('Initialization of integration %g took %g seconds\n', j, t_initint)
+                end
+                
+                if opts.ParallelizeExperiments
+                    if timeIntegration
+                        timer_spmd = tic;
+                    end
+                    spmd
+                        if timeIntegration
+                            t_spmd = toc(timer_spmd);
+                            fprintf('Starting spmd block took %g seconds\n', t_spmd)
+                        end
+                        if timeIntegration
+                            inttime_workers = 0;
+                        end
+                        
+                        % Get local experiments
+                        if timeIntegration
+                            timer_getlocalparts = tic;
+                        end
+                        con_i = getLocalPart(cons);
+                        con_i = con_i{1};
+                        obj_i = getLocalPart(objs);
+                        obj_i = obj_i{1};
+                        constr_obj_i = getLocalPart(constr_objs);
+                        constr_obj_i = constr_obj_i{1};
+                        opts_i = getLocalPart(optss);
+                        opts_i = opts_i{1};
+                        TisWorker_i = getLocalPart(TisWorker);
+                        TisWorker_i = TisWorker_i{1};
+                        if timeIntegration
+                            t_getlocalparts = toc(timer_getlocalparts);
+                            fprintf('Took %g seconds for worker to get local parts\n', t_getlocalparts)
+                        end
+                        %icon_worker_i = getLocalPart(icon_workers);
+                        
+                        % Filter down to the objectives matching the requested
+                        % integrate function
+                        obj_all_i_cell = cell(numel(index),1);
+                        obj_all_i_cell(isobjective) = {obj_i};
+                        obj_all_i_cell(~isobjective) = constr_obj_i(index(~isobjective));
+                        obj_all_i = vertcat(obj_all_i_cell{:});
+                        
+                        if isempty(con_i)
+                            ints = [];
+                        else
+                            % Update model and experiments with provided parameters
+                            [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
+                            
+                            % Integrate the system
+                            ncon_i = numel(con_i);
+                            for i = ncon_i:-1:1
+                                opts_ii = opts_i;
+                                opts_ii.AbsTol = opts_ii.AbsTol{i};
+                                opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
+                                opts_ii.UseInputControls = opts_ii.UseInputControls{i};
+                                opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
+                                if timeIntegration
+                                    fprintf('Integrating experiment %s\n', con_i(i).Name)
+                                    inttimer = tic;
+                                end
+                                if j == 1
+                                    ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii);
+                                else
+                                    ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii, prev_obj_all_cell_filtered, prevint_filtered);
+                                end
+                                if timeIntegration
+                                    tcon = toc(inttimer);
+                                    fprintf('Experiment %s took %g seconds to integrate\n', con_i(i).Name, tcon)
+                                    inttime_workers = inttime_workers + tcon;
+                                end
+                            end
+                        end
+                    end
+                else
                     if timeIntegration
                         inttime_workers = 0;
                     end
-                    
                     % Get local experiments
-                    if timeIntegration
-                        timer_getlocalparts = tic;
-                    end
-                    con_i = getLocalPart(cons);
-                    con_i = con_i{1};
-                    obj_i = getLocalPart(objs);
-                    obj_i = obj_i{1};
-                    constr_obj_i = getLocalPart(constr_objs);
-                    constr_obj_i = constr_obj_i{1};
-                    opts_i = getLocalPart(optss);
-                    opts_i = opts_i{1};
-                    TisWorker_i = getLocalPart(TisWorker);
-                    TisWorker_i = TisWorker_i{1};
-                    if timeIntegration
-                        t_getlocalparts = toc(timer_getlocalparts);
-                        fprintf('Took %g seconds for worker to get local parts\n', t_getlocalparts)
-                    end
-                    %icon_worker_i = getLocalPart(icon_workers);
+                    con_i = cons{1};
+                    obj_i = objs{1};
+                    constr_obj_i = constr_objs{1};
+                    opts_i = optss{1};
+                    TisWorker_i = TisWorker{1};
                     
-                    % Filter down to the objectives matching the requested
+                    % Filter down to the objs matching the requested
                     % integrate function
                     obj_all_i_cell = cell(numel(index),1);
                     obj_all_i_cell(isobjective) = {obj_i};
@@ -422,103 +477,64 @@ outfun = @outfun_;
                             if timeIntegration
                                 tcon = toc(inttimer);
                                 fprintf('Experiment %s took %g seconds to integrate\n', con_i(i).Name, tcon)
-                                inttime_workers = inttime_workers + tcon;
+                                inttime_workers = inttime_workers + toc(inttimer);
                             end
                         end
-                    end
-                end
-            else
-                if timeIntegration
-                    inttime_workers = 0;
-                end
-                % Get local experiments
-                con_i = cons{1};
-                obj_i = objs{1};
-                constr_obj_i = constr_objs{1};
-                opts_i = optss{1};
-                TisWorker_i = TisWorker{1};
-                
-                % Filter down to the objs matching the requested
-                % integrate function
-                obj_all_i_cell = cell(numel(index),1);
-                obj_all_i_cell(isobjective) = {obj_i};
-                obj_all_i_cell(~isobjective) = constr_obj_i(index(~isobjective));
-                obj_all_i = vertcat(obj_all_i_cell{:});
-                
-                if isempty(con_i)
-                    ints = [];
-                else
-                    % Update model and experiments with provided parameters
-                    [m_i,con_i] = updateAll(m, con_i, T(TisWorker_i), opts_i.UseParams, opts_i.UseSeeds, opts_i.UseInputControls, opts_i.UseDoseControls);
-                    
-                    % Integrate the system
-                    ncon_i = numel(con_i);
-                    for i = ncon_i:-1:1
-                        opts_ii = opts_i;
-                        opts_ii.AbsTol = opts_ii.AbsTol{i};
-                        opts_ii.UseSeeds = opts_ii.UseSeeds(:,i);
-                        opts_ii.UseInputControls = opts_ii.UseInputControls{i};
-                        opts_ii.UseDoseControls = opts_ii.UseDoseControls{i};
-                        if timeIntegration
-                            fprintf('Integrating experiment %s\n', con_i(i).Name)
-                            inttimer = tic;
-                        end
-                        if j == 1
-                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii);
-                        else
-                            ints(:,i) = integrateFunctions{j}(m_i, con_i(i), obj_all_i(:,i), opts_ii, prev_obj_all_cell_filtered, prevint_filtered);
-                        end
-                        if timeIntegration
-                            tcon = toc(inttimer);
-                            fprintf('Experiment %s took %g seconds to integrate\n', con_i(i).Name, tcon)
-                            inttime_workers = inttime_workers + toc(inttimer);
-                        end
+                        
                     end
                     
+                    if timeIntegration
+                        inttime_workers = {inttime_workers};
+                    end
+                    ints = {ints};
                 end
                 
-                if timeIntegration
-                    inttime_workers = {inttime_workers};
+                clear int; % Prevents "subscripted assignment between dissimilar structures" error
+                
+                % Combine the workers' int structs by concatenating horizontally
+                for i = NumWorkers:-1:1
+                    ints_temp = ints{i};
+                    if ~isempty(ints_temp)
+                        int(:,icon_worker{i}) = ints_temp;
+                    end
                 end
-                ints = {ints};
+                
+                clear ints; % Prevents "subscripted assignment between dissimilar structures" error
+                
+                % Separate int array into cells representing the objective and
+                % different constraints
+                obj_all_cell = cell(numel(index),1);
+                obj_all_cell(isobjective) = {obj};
+                obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
+                int_cell = mat2cell(int, cellfun(@(x)size(x,1), obj_all_cell), n_con);
+                
             end
-            
-            clear int; % Prevents "subscripted assignment between dissimilar structures" error
-            
-            % Combine the workers' int structs by concatenating horizontally
-            for i = NumWorkers:-1:1
-                ints_temp = ints{i};
-                if ~isempty(ints_temp)
-                    int(:,icon_worker{i}) = ints_temp;
-                end
-            end
-            
-            clear ints; % Prevents "subscripted assignment between dissimilar structures" error
-            
-            % Separate int array into cells representing the objective and
-            % different constraints
-            obj_all_cell = cell(numel(index),1);
-            obj_all_cell(isobjective) = {obj};
-            obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
-            int_cell = mat2cell(int, cellfun(@(x)size(x,1), obj_all_cell), n_con);
             
             % Add other fields needed
             ObjWeights = num2cell(opts.ObjWeights);
             isobjective_i = find(isobjective);
+            isconstraint_i = find(~isobjective);
+            % Special fields for objectives
             for oi = isobjective_i(:).'
                 [int_cell{oi}.ObjWeight] = deal(ObjWeights{:});
             end
+            % Special fields for constraints
+            for ci = isconstraint_i(:).'
+                [int_cell{ci}.ObjWeight] = deal(1); % Use weights of 1 for constraints. No support for varying ObjWeights for constraints at this point.
+            end
+            % General fields needed for both objectives and constraints
             for i = 1:n_con
                 for k = 1:size(int_cell,1)
                     [int_cell{k}(:,i).TisExperiment] = deal(TisExperiment(:,i));
                     [int_cell{k}(:,i).T] = deal(T(TisExperiment(:,i)));
                     [int_cell{k}(:,i).nT] = deal(sum(TisExperiment(:,i)));
-                    [int_cell{k}.ObjWeight] = deal(1); % Use weights of 1 for constraints. No support for varying ObjWeights for constraints at this point.
                 end
             end
             
             prevint = int_cell;
-            prev_obj_all_cell = obj_all_cell;
+            prev_obj_all_cell = cell(numel(index),1);
+            prev_obj_all_cell(isobjective) = {obj};
+            prev_obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
             prev_index = index;
             prev_isobjective = isobjective;
             
@@ -748,7 +764,11 @@ outfun = @outfun_;
         
         if useM
             W = 2*JTJ + M_last_hess;
-            M = errscale*(M_last_hess - 1/(s.'*W*s)*(W*s)*(W*s).' + 1/(y.'*s)*(y*y.'));
+            if norm(s) < eps
+                M = M_last_hess;
+            else
+                M = errscale*(M_last_hess - 1/(s.'*W*s)*(W*s)*(W*s).' + 1/(y.'*s)*(y*y.'));
+            end
         else
             M = zeros(nT);
         end
@@ -852,6 +872,11 @@ outfun = @outfun_;
                 lastT.integrateAllSens = T;
                 lastT.integrateAllSys = T;
         end
+    end
+
+    function updateOpts(newOpts)
+        opts = newOpts;
+        initializeParallelPool()
     end
 
 end
