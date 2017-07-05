@@ -90,16 +90,16 @@ end
 assert(nargin >= 3, 'KroneckerBio:SimulateSystem:TooFewInputs', 'SimulateSystem requires at least 3 input arguments')
 assert(isscalar(m), 'KroneckerBio:SimulateSystem:MoreThanOneModel', 'The model structure must be scalar')
 
+% Ensure structures are proper sizes
+[con, n_con] = fixCondition(con);
+[obs, n_obs] = fixObservation(obs, n_con);
+
 % Default options
 derorder = 0;
 opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
-
-% Ensure structures are proper sizes
-[con, n_con] = fixCondition(con);
-[obs, n_obs] = fixObservation(obs, n_con);
 
 %% Run integration for the experiment
 sim = emptystruct([n_obs,n_con]);

@@ -302,11 +302,12 @@ else
    Fun = @(x) fun2(x,Obj,Con,A,b,Aeq,beq);
    Grd = @(x) grd2(x,Obj,Con,A,Aeq);
    nargout_obj = nargout(Obj);
-   if isempty(Con)
-       nargout_con = 4;
-   else
-       nargout_con = nargout(Con);
-   end
+   nargout_con = 4; % Hacked in to make sure FD isn't used
+%    if isempty(Con)
+%        nargout_con = 4;
+%    else
+%        nargout_con = nargout(Con);
+%    end
    fd_gradients = nargout_obj<2 || nargout_con<3;
 end
 %
@@ -518,6 +519,9 @@ end
 %%--------------------------------------------------------------------
 % Start Main Loop
 %
+
+maxstepsize = Opts.MaxStepSize;
+
 while nit<=opts(15)
    nit=nit+1; minalpha=min_alpha; status=0;
    %------------------------------------------------------------------
@@ -526,7 +530,6 @@ while nit<=opts(15)
 %  [s,u,statusqp]=qp(H,fp,gpv',-gv,[],[],s,nec,-1);
 % TODO: add ability to limit step size in first few steps only. Below code
 % is toward this goal.
-    maxstepsize = Opts.MaxStepSize;
 %    if nit <= Opts.NumShortSteps
 %        maxstepsize = Opts.MaxStepSize;
 %    else
@@ -535,7 +538,7 @@ while nit<=opts(15)
     % Adjust max step size
     if alpha == 1 && steplimitactive
         maxstepsize = maxstepsize*1.41;
-    elseif alpha <= 0.1
+    elseif alpha <= 0.1 && nit > 1
         maxstepsize = maxstepsize/1.41;
     end
    [s,u,statusqp,steplimitactive]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);

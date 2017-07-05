@@ -70,56 +70,19 @@ if nargin < 4
     opts = [];
 end
 
-assert(nargin >= 2, 'KroneckerBio:SimulateSensitivity:TooFewInputs', 'SimulateSensitivity requires at least 2 input arguments')
+assert(nargin >= 3, 'KroneckerBio:SimulateSensitivity:TooFewInputs', 'SimulateSensitivity requires at least 2 input arguments')
 assert(isscalar(m), 'KroneckerBio:SimulateSensitivity:MoreThanOneModel', 'The model structure must be scalar')
-
-% Default options
-defaultOpts.Verbose          = 1;
-
-defaultOpts.RelTol           = [];
-defaultOpts.AbsTol           = [];
-
-defaultOpts.ComplexStep    = false;
-
-defaultOpts.Normalized       = true;
-defaultOpts.UseParams        = 1:m.nk;
-defaultOpts.UseSeeds         = [];
-defaultOpts.UseInputControls = [];
-defaultOpts.UseDoseControls  = [];
-
-defaultOpts.TimeoutDuration = [];
-
-opts = mergestruct(defaultOpts, opts);
-
-verbose = logical(opts.Verbose);
-opts.Verbose = max(opts.Verbose-1,0);
-
-% Constants
-nx = m.nx;
-nk = m.nk;
-ns = m.ns;
 
 % Ensure structures are proper sizes
 [con, n_con] = fixCondition(con);
 [obs, n_obs] = fixObservation(obs, n_con);
 
-% Ensure UseParams is logical vector
-[opts.UseParams, nTk] = fixUseParams(opts.UseParams, nk);
+% Default options
+derorder = 1;
+opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
-% Ensure UseSeeds is a logical matrix
-[opts.UseSeeds, nTs] = fixUseSeeds(opts.UseSeeds, ns, n_con);
-
-% Ensure UseControls are cell vectors of logical vectors
-[opts.UseInputControls, nTq] = fixUseControls(opts.UseInputControls, n_con, cat(1,con.nq));
-[opts.UseDoseControls, nTh] = fixUseControls(opts.UseDoseControls, n_con, cat(1,con.nh));
-
-nT = nTk + nTs + nTq + nTh;
-
-% RelTol
-opts.RelTol = fixRelTol(opts.RelTol);
-
-% Fix AbsTol to be a cell array of vectors appropriate to the problem
-opts.AbsTol = fixAbsTol(opts.AbsTol, 2, false(n_con,1), nx, n_con, false, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
+verbose = logical(opts.Verbose);
+opts.Verbose = max(opts.Verbose-1,0);
 
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_obs], 'Type', 'Name', 't', 'x', 'u', 'y', 'dxdT', 'dudT', 'dydT', 'ie', 'te', 'xe', 'ue', 'ye', 'dxedT', 'duedT', 'dyedT', 'int');

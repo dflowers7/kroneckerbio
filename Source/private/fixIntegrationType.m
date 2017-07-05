@@ -28,7 +28,9 @@ tGet = cell(nCon,nTop);
 for iTop = 1:nTop
     for iCon = 1:nCon
         for iObj = 1:nObj
-            continuous(iCon,iTop) = continuous(iCon,iTop) || obj(iObj,iCon,iTop).Continuous;
+            if isfield(obj(iObj,iCon,iTop), 'Continuous')
+                continuous(iCon,iTop) = continuous(iCon,iTop) || obj(iObj,iCon,iTop).Continuous;
+            end
             complex(iCon,iTop) = complex(iCon,iTop) || obj(iObj,iCon,iTop).Complex;
         end
         

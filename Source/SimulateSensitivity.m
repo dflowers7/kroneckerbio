@@ -95,16 +95,16 @@ end
 assert(nargin >= 3, 'KroneckerBio:SimulateSensitivity:TooFewInputs', 'SimulateSensitivity requires at least 2 input arguments')
 assert(isscalar(m), 'KroneckerBio:SimulateSensitivity:MoreThanOneModel', 'The model structure must be scalar')
 
+% Ensure structures are proper sizes
+[con, n_con] = fixCondition(con);
+[obs, n_obs] = fixObservation(obs, n_con);
+
 % Default options
 derorder = 1;
 opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
-
-% Ensure structures are proper sizes
-[con, n_con] = fixCondition(con);
-[obs, n_obs] = fixObservation(obs, n_con);
 
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_con]);

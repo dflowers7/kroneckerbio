@@ -94,15 +94,15 @@ if nargin < 4
     opts = [];
 end
 
+% Ensure structures are proper sizes
+[con, n_con] = fixCondition(con);
+[obs, n_obs] = fixObservation(obs, n_con);
+
 derorder = 2;
 opts = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
-
-% Ensure structures are proper sizes
-[con, n_con] = fixCondition(con);
-[obs, n_obs] = fixObservation(obs, n_con);
 
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_con]);

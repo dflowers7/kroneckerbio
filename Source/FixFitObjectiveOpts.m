@@ -175,6 +175,8 @@ switch opts.Solver
         assert(~isNonlinearConstraint, 'KroneckerBio:FitObjective:lsqnonlinNonlinearConstraintNotSupported', ...
             'The lsqnonlin solver does not support nonlinear constraints. Use the fmincon solver instead.')
     case 'sqp'
+        localOpts.GradObj     = 'on';
+        localOpts.GradConstr  = 'on';
         localOpts.MaxStepSize = opts.MaxStepSize;
 end
 localOpts.Algorithm           = opts.Algorithm;

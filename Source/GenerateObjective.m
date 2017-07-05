@@ -721,20 +721,28 @@ updateoptsfun = @updateOpts;
         if isempty(T_last_hess)
             gs_last_hess_possible = gs;
             errs_last_hess_possible = errs;
-            B = JTJ;
-            eigB = real(eig(B));
-            min_hess_eigval = max(eigB)/max_hess_condno;
-            c = max(0, min_hess_eigval - min(eigB));
-            % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
-            % SHOULD BE COMMENTED OUT.
-            %c = 0;
-            %M_last_hess_possible = zeros(nT);
-            % ...or...
-            M_last_hess_possible = c*eye(nT);
-            % It's not clear whether I should do this or not
-            %H = B + c*diag(diag(B));
-            %H = B + c*eye(nT);
-            H = B + M_last_hess_possible;
+            
+            if any(isPureLeastSquares)
+                B = 2*JTJ;
+                % Don't need to take absolute values of eigenvalues here because JTJ always has
+                % positive or zero eigenvalues
+                eigB = real(eig(B));
+                min_hess_eigval = max(eigB)/max_hess_condno;
+                c = max(0, min_hess_eigval - min(eigB));
+                % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
+                % SHOULD BE COMMENTED OUT.
+                %c = 0;
+                %M_last_hess_possible = zeros(nT);
+                % ...or...
+                M_last_hess_possible = c*eye(nT);
+                % It's not clear whether I should do this or not
+                %H = B + c*diag(diag(B));
+                %H = B + c*eye(nT);
+                H = B + M_last_hess_possible;
+            else
+                M_last_hess_possible = eye(nT);
+                H = M_last_hess_possible;
+            end
             
             if updateHessianVarsInHessFun
                 T_last_hess = T;
@@ -755,19 +763,23 @@ updateoptsfun = @updateOpts;
         
         s = T - T_last_hess;
         
-        errs_lscaled = arrayfun(@(err,l){err{1}*l}, errs(isPureLeastSquares), lc(isPureLeastSquares));
-        errs_lscaled_last = arrayfun(@(err,l){err{1}*l}, errs_last_hess(isPureLeastSquares), lc(isPureLeastSquares));
-        errs_lscaled = vertcat(errs_lscaled{:});
-        errs_lscaled_last = vertcat(errs_lscaled_last{:});
-        errscale = errs_lscaled.'*errs_lscaled_last/(errs_lscaled_last.'*errs_lscaled_last);
-        errscale = errscale.^2;
+        if any(isPureLeastSquares)
+            errs_lscaled = arrayfun(@(err,l){err{1}*l}, errs(isPureLeastSquares), lc(isPureLeastSquares));
+            errs_lscaled_last = arrayfun(@(err,l){err{1}*l}, errs_last_hess(isPureLeastSquares), lc(isPureLeastSquares));
+            errs_lscaled = vertcat(errs_lscaled{:});
+            errs_lscaled_last = vertcat(errs_lscaled_last{:});
+            errscale = errs_lscaled.'*errs_lscaled_last/(errs_lscaled_last.'*errs_lscaled_last);
+            errscale = errscale.^2;
+        else
+            errscale = 1;
+        end
         
         if useM
             W = 2*JTJ + M_last_hess;
             if norm(s) < eps
                 M = M_last_hess;
             else
-                M = errscale*(M_last_hess - 1/(s.'*W*s)*(W*s)*(W*s).' + 1/(y.'*s)*(y*y.'));
+                M = errscale*(M_last_hess - (W*s)*(W*s).'/(s.'*W*s) + (y*y.')/(y.'*s));
             end
         else
             M = zeros(nT);
@@ -775,9 +787,15 @@ updateoptsfun = @updateOpts;
         
         B = 2*JTJ + M;
         
-        eigB = real(eig(B));
+        % Correct B's eigenvalues to be positive and to satisfy the
+        % provided minimum condition number
+        [eigV,eigB] = eig(B, 'vector');
+        eigB = abs(real(eigB));
         min_hess_eigval = max(eigB)/max_hess_condno;
-        c = max(0, min_hess_eigval - min(eigB));
+        eigB(eigB < min_hess_eigval) = min_hess_eigval;
+        H = eigV*diag(eigB)*eigV.';
+        
+        %c = max(0, min_hess_eigval - min(eigB));
         % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
         % SHOULD BE COMMENTED OUT.
         %c = 0;
@@ -790,7 +808,7 @@ updateoptsfun = @updateOpts;
 %         H = JTJ + c*eye(nT);
         
         %H = B + c*diag(diag(B));
-        H = B + c*eye(nT);
+        %H = B + c*eye(nT);
         H = (H+H.')/2; % Ensure symmetric enough to avoid warnings
         % ...or...
         %M = M + c*eye(nT);
