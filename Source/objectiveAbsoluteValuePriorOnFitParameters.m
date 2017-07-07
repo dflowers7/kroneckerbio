@@ -60,6 +60,8 @@ obj.DiscreteTimes = 0;
 obj.G      = @G;
 obj.dGdT   = @dGdT;
 obj.d2GdT2 = @d2GdT2;
+obj.d2GdT2_approximate = @d2GdT2_approximate;
+obj.approximateIsExactHessian = true;
 % obj.err    = @err;
 % obj.derrdT = @derrdT;
 
@@ -133,9 +135,16 @@ obj = pastestruct(objectiveZero, obj);
         % Fix quadratic portion (not implemented!)
     end
 
+    function val = d2GdT2_approximate(int)
+        
+        % Just use the actual Hessian because it's already fast to compute
+        val = d2GdT2(int);
+        
+    end
+
 % This function is not a valid least squares type function, so it does not
 % have err and derrdT functions. You can't use the square root of the
-% absolute value because the derivative is infinite at zero.
+% absolute value because the derivative approaches (+-)infinity at zero.
 
 %     function val = err(int)
 %         T = int.T;

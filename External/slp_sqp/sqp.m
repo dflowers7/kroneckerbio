@@ -485,6 +485,10 @@ r=1e-2*ones(lenv,1);rub=1e9;rstep=10;s=[];
 rholb=1;rhoub=1e6;rhostep=100;rho=1;
 deltaub=.9;alpha=0;min_alpha=sqrt(eps);dx=0;ext_pen=0;aug='f';
 aeps=1.8*eps;pert=0;nopt=0;sqacc=sqrt(opts(3));
+maxstepsize = Opts.MaxStepSize;
+z0best = Inf;
+z0factor = 0.01;
+dxlast = zeros(numel(x0),1); iszigzagging = false;
 fs='%5.0f %12.5g %9.3g %4.0f %10.3g %4.0f  %9.3g %9.3g';
 %---------------------------------------------------------------------
 % Display appropriate banner if opts(1)>0
@@ -512,15 +516,13 @@ if opts(1)>0
          ban3s=' KTO    max(S)';
       end
    end
-   ban4s = sprintf('%10s%10s', '|dx|', 'xlim');
+   ban4s = sprintf('%10s%10s%10s%10s', '|dx|', 'xlim', 'Dist x0', 'zigzag');
    disp([ban2s ban3s ban4s]);
 end
 
 %%--------------------------------------------------------------------
 % Start Main Loop
 %
-
-maxstepsize = Opts.MaxStepSize;
 
 while nit<=opts(15)
    nit=nit+1; minalpha=min_alpha; status=0;
@@ -536,9 +538,9 @@ while nit<=opts(15)
 %        maxstepsize = Inf;
 %    end
     % Adjust max step size
-    if alpha == 1 && steplimitactive
+    if alpha == 1 && steplimitactive && z0 <= z0best && ~iszigzagging
         maxstepsize = maxstepsize*1.41;
-    elseif alpha <= 0.1 && nit > 1
+    elseif (alpha < 1 || iszigzagging) && nit > 1
         maxstepsize = maxstepsize/1.41;
     end
    [s,u,statusqp,steplimitactive]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
@@ -558,8 +560,10 @@ while nit<=opts(15)
          r=max(sigma,r);
       end
       [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+      z0best = min(z0best, z0);
       while z0p1>0 && max(r)<rub
          [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+         z0best = min(z0best, z0);
          if z0p1>0;r=r*rstep;end
       end
       z0p1fail=z0p1>0; % && (fp+gpv*u)'*s>0;
@@ -608,6 +612,7 @@ while nit<=opts(15)
       if aug=='f' && (sHsfail || delta>deltaub || ~statusok)
          aug='t'; nAS=nAS+1; sHsfail=0; delta=0;
          [z0,z0p1,z0p2,z0p3]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+         z0best = min(z0best, z0);
          [s,u1,statusqp,steplimitactive]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
          u=v+z0p3; u([lb ub])=u1;
          if ~(strcmp(statusqp(1:2),'ok') || strcmp(statusqp(1:3),'max'))
@@ -628,10 +633,12 @@ while nit<=opts(15)
          r=max(sigma,r);
       end
       [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+      z0best = min(z0best, z0);
       z0p1fail=z0p1>=0;
       while z0p1fail && max(r)<=rub
          r=r*rstep;
          [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+         z0best = min(z0best, z0);
          z0p1fail=z0p1>=0;
       end
       if z0p1fail
@@ -668,30 +675,40 @@ while nit<=opts(15)
    end
    if opts(1)>2,NLGs=num2str(max(abs(NLG)),4);DBDs=num2str(s'*H*s,4);end
    %
+   % Determine whether x's path is zig-zagging based on the cosine of the
+   % past two steps
+   %
+   if nit <= 2
+       zigzagmetric = NaN;
+   else
+       zigzagmetric = dx(:).'*dxlast(:)/(norm(dx)*norm(dxlast));
+   end
+   iszigzagging = ~isnan(zigzagmetric) && zigzagmetric < 0;
+   %
    % Display iteration info
    %
-   
    if opts(1)
       if mj>lenv-lenvub, mj=mj-ncs-lenvlb; fs(38)='+';
       elseif mj>ncs, mj=mj-ncs; fs(38)='-';
       else, fs(38)=' ';
       end
-      fs_new = [fs '%10.3g%10.3g'];
+      fs_new = [fs '%10.3g%10.3g%10.3g%10.3g'];
       if opts(1)>3 && nit~=1
          disp(['ITERATION ' int2str(nit-1)]);% -1 to match Sch.
          disp([ban2s ban3s]);
       end
       if opts(6)==(-1)
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO,norm(dx),maxstepsize),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
       elseif opts(6)==1
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2,norm(dx),maxstepsize),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
       elseif opts(6)==2
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf),norm(dx),maxstepsize),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf),norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
       else
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,KTO,ms,norm(dx),maxstepsize),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,KTO,ms,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
       end
       trouble='';
    end
+   dxlast = dx;
    %
    % Check termination criteria
    %
@@ -701,6 +718,7 @@ while nit<=opts(15)
       if ms/2<opts(2) && AG/2<opts(3) && mg<opts(4);v=u;break;end
    elseif opts(6)==2
       [z0,z0p1,z0p2]=merit(v,r,nec,f,gv,fp,gpv,u,s);
+      z0best = min(z0best, z0);
       Slowed     = abs(f-z0)      < opts(3) && nit > 1 && ...
                    abs(f0-f0last) < opts(3) && max(abs(dx)) < opts(2);
       if (Slowed || norm(NLG,inf) < opts(3))&& mg < opts(4); v=u;break;end
@@ -747,7 +765,7 @@ while nit<=opts(15)
       %
       z=merit(v,r,nec,f,gv);
       minalpha = min( opts(2)/max(abs(s)), minalpha );
-      while z>z0+mu*alpha*z0p1 && nlin<nlinmax && alpha>minalpha
+      while z>(z0best+z0factor*abs(z0best))+mu*alpha*z0p1 && nlin<nlinmax && alpha>minalpha
          nlin=nlin+1;
          %
          % Use 2pt quadradic approx to minimize the merit function
@@ -760,7 +778,7 @@ while nit<=opts(15)
          mg=max([abs(g(1:nec)); g(nec+1:ncs); gv(ncs+1:lenv)]);
          z=merit(v,r,nec,f,gv);
       end
-      z0p1fail = z>z0+mu*alpha*z0p1; best=alpha;
+      z0p1fail = z>(z0best+z0factor*abs(z0best))+mu*alpha*z0p1; best=alpha;
    end
 %     if nlin >=nlinmax
 %       k=0; 
@@ -786,6 +804,7 @@ while nit<=opts(15)
 %     s = qp([],gp*vlm,[],[],slb(1:lenvlb),sub(1:lenvub),s,nec,-1);
       [s,u1,~,steplimitactive] = qp(eye(ndv)/minalpha,gp*vlm,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
       [z0,z0p1] = merit(vlm,[],nec,[],g0,[],gp,[],s); % exterior penalty
+      z0best = min(z0best, z0);
       if max(abs(s))>eps && z0>eps
          u=[vlm; u1];
       else
@@ -801,7 +820,7 @@ while nit<=opts(15)
          leastmg=mg; best=alpha; bestf=f; bestgv=gv; bestx=x;
       end
       z = merit(vlm,[],nec,[],g);
-      z0p1fail = mg>leastmg || mg<(-opts(4)) || z>z0+mu*alpha*z0p1;
+      z0p1fail = mg>leastmg || mg<(-opts(4)) || z>(z0best+z0factor*abs(z0best))+mu*alpha*z0p1;
       nlinmax2 = nlin + nlinmax;
       if max(abs(s))>opts(2)/2
          minalpha = min( opts(2)/max(abs(s)), min_alpha );
@@ -817,7 +836,7 @@ while nit<=opts(15)
          [f,g,gv,Best]=scalefg( f0, g, scf, scg, lscg, x, vlb, vub, ilb, iub, v, opts(4), Best );
          mg=max([abs(g(1:nec)); g(nec+1:ncs); gv(ncs+1:lenv)]);
          z = merit(vlm,[],nec,[],g);
-         z0p1fail = mg>leastmg || mg<(-opts(4)) || z>z0+mu*alpha*z0p1;
+         z0p1fail = mg>leastmg || mg<(-opts(4)) || z>(z0best+z0factor*abs(z0best))+mu*alpha*z0p1;
          if mg<leastmg && mg>(-opts(4))
             leastmg=mg; best=alpha; bestf=f; bestgv=gv; bestx=x;
          end

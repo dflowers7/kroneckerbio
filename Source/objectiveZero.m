@@ -179,6 +179,10 @@ obj.derrdT = @derrdT;
 
 % GenerateObjective functions
 obj.dGdT = @dGdT;
+obj.d2GdT2 = @d2GdT2;
+obj.d2GdT2_approximate = @d2GdT2_approximate;
+obj.approximateIsExactHessian = false;
+obj.Gbest = 0;
 
 % Information theory
 obj.p = @p;
@@ -302,6 +306,12 @@ end
 
 function val = dGdT(int)
 val = sparse(int.nT,1);
+end
+function val = d2GdT2(int)
+val = sparse(int.nT,int.nT);
+end
+function val = d2GdT2_approximate(int)
+val = sparse(int.nT,int.nT);
 end
 
 % For Objective.Information

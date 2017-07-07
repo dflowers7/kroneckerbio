@@ -277,16 +277,18 @@ displayedMemoWarning = false;
 
 % Initialize Hessian approximation variables
 gs_last_hess_possible = [];
-M_last_hess_possible = [];
 errs_last_hess_possible = [];
+derrdTs_last_hess_possible = [];
+As_last_hess_possible = [];
 T_last_hess = [];
 gs_last_hess = [];
-M_last_hess = [];
 errs_last_hess = [];
-isPureLeastSquares = [];
+derrdTs_last_hess = [];
+As_last_hess = [];
 max_hess_condno = funopts.HessianMaximumConditionNumber;
-useM = funopts.ApproximateSecondOrderHessianTerm;
-c = [];
+isExactHessian = [];
+hasLeastSquares = [];
+
 updateHessianVarsInHessFun = strcmp(opts.Solver, 'sqp');
 
 objfun = @objective;
@@ -560,7 +562,7 @@ updateoptsfun = @updateOpts;
         
     end
 
-    function [G,D,err,derrdT] = objective(T)
+    function [G,D,err,derrdT,Happrox] = objective(T)
         
         % Unnormalize
         if opts.Normalized
@@ -586,9 +588,12 @@ updateoptsfun = @updateOpts;
         if nargout_ > 1
             D = varargout{2};
             if nargout_ > 2
-                err = varargout{3};
+                err = varargout(3);
                 if nargout_ > 3
-                    derrdT = varargout{4};
+                    derrdT = varargout(4);
+                    if nargout_ > 4
+                        Happrox = varargout(5);
+                    end
                 end
             end
         end
@@ -598,7 +603,7 @@ updateoptsfun = @updateOpts;
         
     end
 
-    function varargout = constraint(T)
+    function [c,ceq,GC,GCeq,err,derrdT,Happrox] = constraint(T)
         % Outputs: c,ceq,GC,GCeq
         
         % Unnormalize
@@ -616,62 +621,105 @@ updateoptsfun = @updateOpts;
         
         nconstraintfuns = numel(integrateFunctions_constraint);
         
-        % Initialize output cell array
-        varargout = cell(nargout_,1);
-        for j = 1:nargout_
-            varargout{j} = cell(nconstraintfuns,1);
-        end
+        % Initialize output cell arrays
+        [c,ceq,GC,GCeq,err,derrdT,Happrox] = deal(cell(nconstraintfuns,1));
+        
+%         varargout = cell(nargout_,1);
+%         for j = 1:nargout_
+%             varargout{j} = cell(nconstraintfuns,1);
+%         end
         
         % Calculate constraint function value for each constraint function
-        out_i = cell(nargout_,1);
+%         out_i = cell(nargout_,1);
         isobjective = false;
         integrfun_i = min(nargout_, 4);
         for i = 1:nconstraintfuns
             index = i;
             int_i = integr(T, integrateFunctions_constraint{i}(integrfun_i,:), isobjective, index);
-            [out_i{:}] = constraintFunctions{i}(constr_obj{i}, int_i);
-            for j = 1:nargout_
-                if ~isempty(out_i{j})
-                    varargout{j}{i} = out_i{j};
-                end
+            if nargout_ < 3
+                [c{i},ceq{i}] = constraintFunctions{i}(constr_obj{i}, int_i);
+            else
+                [c{i},ceq{i},GC{i},GCeq{i},err{i},derrdT{i},Happrox{i}] = constraintFunctions{i}(constr_obj{i}, int_i);
             end
+%             for j = 1:nargout_
+%                 if ~isempty(out_i{j})
+%                     varargout{j}{i} = out_i{j};
+%                 end
+%             end
         end
         
         % Concatenate constraint function values across constraint
         % functions
-        for j = 1:nargout_
-            if j <= 2
-                varargout{j} = vertcat(varargout{j}{:});
-            elseif j <= 4
-                varargout{j} = [varargout{j}{:}];
-            else
-                varargout{j} = vertcat(varargout{j}{:});
-            end
+        c = vertcat(c{:});
+        ceq = vertcat(ceq{:});
+        if nargout_ > 2
+            GC = [GC{:}];
+            GCeq = [GCeq{:}];
         end
+%         for j = 1:nargout_
+%             if j <= 2
+%                 varargout{j} = vertcat(varargout{j}{:});
+%             elseif j <= 4
+%                 varargout{j} = [varargout{j}{:}];
+%             else
+%                 varargout{j} = vertcat(varargout{j}{:});
+%             end
+%         end
         
         % Subtract constraint values from evaluated values, such that
         % all constraints are considered violated when positive
-        for j = 1:min(nargout_,2)
-            if ~isempty(varargout{j})
-                varargout{j} = varargout{j} - constr_vals;
-            end
+        if ~isempty(c)
+            c = c - constr_vals;
         end
+        if ~isempty(ceq)
+            ceq = ceq - constr_vals;
+        end
+%         for j = 1:min(nargout_,2)
+%             if ~isempty(varargout{j})
+%                 varargout{j} = varargout{j} - constr_vals;
+%             end
+%         end
         
         % Scale by constraint values, if requested
         if ScaleConstraints
-            for j = 1:nargout_
-                if ~isempty(varargout{j})
-                    if j <= 2
-                        varargout{j} = varargout{j}./abs(constr_vals);
-                    elseif j <= 4
-                        varargout{j} = bsxfun(@rdivide, varargout{j}, abs(constr_vals(:).'));
-                    else
-                        for k = 1:numel(varargout{j})
-                            varargout{j}{k} = varargout{j}{k}./sqrt(abs(constr_vals(k)));
+            if ~isempty(c)
+                c = c./abs(constr_vals);
+            end
+            if ~isempty(ceq)
+                ceq = ceq./abs(constr_vals);
+            end
+            if nargout_ > 2
+                if ~isempty(GC)
+                    GC = bsxfun(@rdivide, GC, abs(constr_vals(:).'));
+                end
+                if ~isempty(GCeq)
+                    GCeq = bsxfun(@rdivide, GCeq, abs(constr_vals(:).'));
+                end
+                if nargout_ > 4
+                    for k = 1:nconstraintfuns
+                        if ~isempty(err{k})
+                            err{k} = err{k}./sqrt(abs(constr_vals(k)));
+                        end
+                        if ~isempty(derrdT{k})
+                            derrdT{k} = derrdT{k}./sqrt(abs(constr_vals(k)));
                         end
                     end
                 end
             end
+            
+%             for j = 1:nargout_
+%                 if ~isempty(varargout{j})
+%                     if j <= 2
+%                         varargout{j} = varargout{j}./abs(constr_vals);
+%                     elseif j <= 4
+%                         varargout{j} = bsxfun(@rdivide, varargout{j}, abs(constr_vals(:).'));
+%                     else
+%                         for k = 1:numel(varargout{j})
+%                             varargout{j}{k} = varargout{j}{k}./sqrt(abs(constr_vals(k)));
+%                         end
+%                     end
+%                 end
+%             end
         end
         
     end
@@ -686,146 +734,157 @@ updateoptsfun = @updateOpts;
         end
         
         % Calculate new gradients and get Lagrange multipliers
-        [~, g_obj, err_obj, derrdT_obj] = objective(T);
+        [~, g_obj, err_obj, derrdT_obj, Happrox_obj] = objective(T);
         g_obj = {g_obj};
         lc = 1;
         if hasconstraint
-            [~, ~, g_constr, ~, err_constr, derrdT_constr] = constraint(T);
+            [~, ~, g_constr, ~, err_constr, derrdT_constr, Happrox_constr] = constraint(T);
             g_constr = mat2cell(g_constr, nT, ones(size(g_constr,2),1));
             g_constr = g_constr(:);
             lc = [lc; lc_constr];
         else
             g_constr = {};
+            Happrox_constr = {};
             err_constr = {};
             derrdT_constr = {};
         end
-        
         gs = [g_obj; g_constr];
         errs = [err_obj; err_constr];
         derrdTs = [derrdT_obj; derrdT_constr];
-        
-        % Determine whether each objective and constraint is a pure least
-        % squares objective or constraint. Pure least squares
-        % objectives/constraints will return err vectors.
-        if isempty(isPureLeastSquares)
-            isPureLeastSquares = cellfun(@(x)~all(isnan(x)), errs);
-        end
+        Happroxs = [Happrox_obj; Happrox_constr];
 
-        % Calculate known first-order part of Hessian
-        JTJ = zeros(nT);
-        for i = find(isPureLeastSquares(:).')
-            JTJ = JTJ + lc(i)*derrdTs{i}.'*derrdTs{i};
+        % Determine which objective functions have least squares terms
+        % involved
+        if isempty(hasLeastSquares)
+            hasLeastSquares = cellfun(@(err)~isempty(err), errs);
         end
         
-        % Initialize stored values on the first iteration
+        % Determine which objective functions have exact Hessian
+        % approximations (such as for priors, where the calculation of the
+        % exact Hessian is fast)
+        if isempty(isExactHessian)
+            isExactHessian = false(numel(gs), 1);
+            for i = 1:numel(gs)
+                if i == 1
+                    isObjZero = strcmp({obj.Type}, 'Objective.Data.Zero');
+                    isExactHessian(i) = all([obj.approximateIsExactHessian] | isObjZero);
+                else
+                    isObjZero = strcmp({constr_obj.Type}, 'Objective.Data.Zero');
+                    isExactHessian(i) = all([constr_obj{i-1}.approximateIsExactHessian] | isObjZero);
+                end
+            end
+        end
+        
+        % Initialize last iteration terms
         if isempty(T_last_hess)
             gs_last_hess_possible = gs;
             errs_last_hess_possible = errs;
+            derrdTs_last_hess_possible = derrdTs;
+            As_last_hess_possible = repmat({1e-3*eye(nT)}, numel(gs), 1);
+            As_last_hess_possible(isExactHessian) = {zeros(nT)};
             
-            if any(isPureLeastSquares)
-                B = 2*JTJ;
-                % Don't need to take absolute values of eigenvalues here because JTJ always has
-                % positive or zero eigenvalues
-                eigB = real(eig(B));
-                min_hess_eigval = max(eigB)/max_hess_condno;
-                c = max(0, min_hess_eigval - min(eigB));
-                % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
-                % SHOULD BE COMMENTED OUT.
-                %c = 0;
-                %M_last_hess_possible = zeros(nT);
-                % ...or...
-                M_last_hess_possible = c*eye(nT);
-                % It's not clear whether I should do this or not
-                %H = B + c*diag(diag(B));
-                %H = B + c*eye(nT);
-                H = B + M_last_hess_possible;
-            else
-                M_last_hess_possible = eye(nT);
-                H = M_last_hess_possible;
+            H = zeros(nT);
+            for i = 1:numel(Happroxs)
+                H = H + lc(i)*(Happroxs{i} + As_last_hess_possible{i});
             end
             
             if updateHessianVarsInHessFun
                 T_last_hess = T;
                 gs_last_hess = gs_last_hess_possible;
                 errs_last_hess = errs_last_hess_possible;
-                M_last_hess = M_last_hess_possible;
+                derrdTs_last_hess = derrdTs_last_hess_possible;
+                As_last_hess = As_last_hess_possible;
             end
+            
             return
         end
         
-        g_lagrange = bsxfun(@times, [gs{:}], lc(:).');
-        g_lagrange = sum(g_lagrange, 2);
-        
-        g_lagrange_last = bsxfun(@times, [gs_last_hess{:}], lc(:).');
-        g_lagrange_last = sum(g_lagrange_last, 2);
-        
-        y = g_lagrange - g_lagrange_last;
-        
+        % Calculate approximate Hessian for each objective term
         s = T - T_last_hess;
-        
-        if any(isPureLeastSquares)
-            errs_lscaled = arrayfun(@(err,l){err{1}*l}, errs(isPureLeastSquares), lc(isPureLeastSquares));
-            errs_lscaled_last = arrayfun(@(err,l){err{1}*l}, errs_last_hess(isPureLeastSquares), lc(isPureLeastSquares));
-            errs_lscaled = vertcat(errs_lscaled{:});
-            errs_lscaled_last = vertcat(errs_lscaled_last{:});
-            errscale = errs_lscaled.'*errs_lscaled_last/(errs_lscaled_last.'*errs_lscaled_last);
-            errscale = errscale.^2;
-        else
-            errscale = 1;
-        end
-        
-        if useM
-            W = 2*JTJ + M_last_hess;
-            if norm(s) < eps
-                M = M_last_hess;
+        [As,Bs] = deal(cell(numel(Happroxs),1));
+        for i = 1:numel(Happroxs)
+            
+            if isExactHessian(i)
+                y_hash = zeros(nT,1);
+                y_s = Happroxs{i}*s;
+            elseif hasLeastSquares(i)
+                % y_hash is the Hessian-s product approximation for the
+                % unknown term of the Hessian
+                y_hash = 2*(derrdTs{i} - derrdTs_last_hess{i}).'*errs{i};
+                % Modify y_hash to guarantee that y_hash.'*s is greater
+                % than 0
+                tk = 1e-3 + max(-y_hash.'*s/norm(s).^2,0);
+                y_hash = y_hash + tk*eye(nT)*s;
+                % y_s is the Hessian-s product approximation for the whole
+                % Hessian
+                y_s = y_hash + Happroxs{i}*s;
             else
-                M = errscale*(M_last_hess - (W*s)*(W*s).'/(s.'*W*s) + (y*y.')/(y.'*s));
+                % If not a least squares objective function, the entirety of the Hessian is
+                % unknown, so y_hash contains everything, and y_s = y_hash.
+                % In this case we're using the standard BFGS update.
+                y_hash = gs{i} - gs_last_hess{i};
+                % Modify y_hash to guarantee that y_hash.'*s is greater
+                % than 0
+                tk = 1e-3 + max(-y_hash.'*s/norm(s).^2,0);
+                y_hash = y_hash + tk*eye(nT)*s;
+                y_s = y_hash;
             end
-        else
-            M = zeros(nT);
+            
+            % Threshold negative eigenvalues to zero before calculating the update
+            B_s = As_last_hess{i} + Happroxs{i};
+            [eigvec,eigval] = eig(B_s, 'vector');
+            eigval = abs(eigval);
+            eigvec_scaled = eigvec*diag(sqrt(eigval));
+            B_s = eigvec_scaled*eigvec_scaled.';
+            
+            if norm(s) < 1e-30
+                del = zeros(nT);
+            else
+                temp = (s.'*eigvec)*diag(sqrt(eigval));
+                v = y_s + ((y_s.'*s)/(temp*temp.')).^0.5*B_s*s;
+
+                temp = y_hash - As_last_hess{i}*s;
+                temp2 = temp*v.';
+                del = (temp2 + temp2.')/(v.'*s) + (temp.'*s)*(v*v.')/(v.'*s).^2;
+            end
+            
+            As{i} = As_last_hess{i} + del;
+            
+            Bs{i} = As{i} + Happroxs{i};
         end
         
-        B = 2*JTJ + M;
+        % Combine individual objective function Hessians
+        H = zeros(nT);
+        for i = 1:numel(Bs)
+            H = H + lc(i)*Bs{i};
+        end
         
-        % Correct B's eigenvalues to be positive and to satisfy the
-        % provided minimum condition number
-        [eigV,eigB] = eig(B, 'vector');
-        eigB = abs(real(eigB));
-        min_hess_eigval = max(eigB)/max_hess_condno;
-        eigB(eigB < min_hess_eigval) = min_hess_eigval;
-        H = eigV*diag(eigB)*eigV.';
+        % Correct eigenvalues to be above minimum threshold defined by
+        % minimum condition number
+        [eigvecs,eigvals] = eig(H, 'vector');
+        eigvals = abs(real(eigvals));
+        min_hess_eigval = max(eigvals)/max_hess_condno;
+        eigvals(eigvals < min_hess_eigval) = min_hess_eigval;
+        eigvecs_scaled = eigvecs*diag(sqrt(eigvals));
+        H = eigvecs_scaled*eigvecs_scaled.';
+        %H = (H+H.')/2; % Ensure symmetric enough to avoid warnings
         
-        %c = max(0, min_hess_eigval - min(eigB));
-        % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINE
-        % SHOULD BE COMMENTED OUT.
-        %c = 0;
-        
-        % HACKED-IN TEST. SHOULD NOT BE LEFT THIS WAY. FOLLOWING LINES
-        % SHOULD BE COMMENTED OUT
-%         eig_jtj = real(eig(JTJ));
-%         min_jtj_eigval = max(eig_jtj)/max_hess_condno;
-%         c = max(0, min_jtj_eigval - min(eig_jtj));
-%         H = JTJ + c*eye(nT);
-        
-        %H = B + c*diag(diag(B));
-        %H = B + c*eye(nT);
-        H = (H+H.')/2; % Ensure symmetric enough to avoid warnings
-        % ...or...
-        %M = M + c*eye(nT);
-        %H = JTJ + M;
-        % .. if I want to store the c*eye(nT) term in M when I save it.
-        % It's not clear whether I should do this or not
+        if any(imag(H(:)) > 0)
+            warning('Complex values of H detected. Something is wrong.')
+        end
         
         % Save variables
         gs_last_hess_possible = gs;
         errs_last_hess_possible = errs;
-        M_last_hess_possible = M;
+        derrdTs_last_hess_possible = derrdTs;
+        As_last_hess_possible = As;
         
         if updateHessianVarsInHessFun
             T_last_hess = T;
             gs_last_hess = gs_last_hess_possible;
             errs_last_hess = errs_last_hess_possible;
-            M_last_hess = M_last_hess_possible;
+            derrdTs_last_hess = derrdTs_last_hess_possible;
+            As_last_hess = As_last_hess_possible;
         end
         
     end
@@ -836,10 +895,11 @@ updateoptsfun = @updateOpts;
         % to update the values except at the conclusion of an iteration
         switch state
             case 'iter'
-                T_last_hess = x;
+                T_last_hess = T;
                 gs_last_hess = gs_last_hess_possible;
                 errs_last_hess = errs_last_hess_possible;
-                M_last_hess = M_last_hess_possible;
+                derrdTs_last_hess = derrdTs_last_hess_possible;
+                As_last_hess = As_last_hess_possible;
         end
         stop = other_outfun(x, optimValues, state);
     end

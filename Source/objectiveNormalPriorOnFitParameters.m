@@ -41,6 +41,8 @@ obj.DiscreteTimes = 0;
 obj.G      = @G;
 obj.dGdT   = @dGdT;
 obj.d2GdT2 = @d2GdT2;
+obj.d2GdT2_approximate = @d2GdT2_approximate;
+obj.approximateIsExactHessian = true;
 obj.err    = @err;
 obj.derrdT = @derrdT;
 
@@ -109,6 +111,13 @@ obj = pastestruct(objectiveZero, obj);
                 + diag((2*FTbar(uselogbasis,uselogbasis)*dT).*d2logTdT2);
         end
 
+    end
+
+    function val = d2GdT2_approximate(int)
+        
+        % Just use the actual Hessian because it's already fast to compute
+        val = d2GdT2(int);
+        
     end
 
     function val = err(int)

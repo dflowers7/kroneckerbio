@@ -40,6 +40,8 @@ for i_con = 1:n_con
     [ints.UseSeeds] = deal(UseSeeds_i);
     [ints.UseInputControls] = deal(UseInputControls_i);
     [ints.UseDoseControls] = deal(UseDoseControls_i);
+    T_i = collectActiveParameters(m, con(i_con), opts.UseParams, UseSeeds_i, {UseInputControls_i}, {UseDoseControls_i});
+    [ints.T] = deal(T_i);
     
     % Extract continuous term
     if opts.continuous(i_con)

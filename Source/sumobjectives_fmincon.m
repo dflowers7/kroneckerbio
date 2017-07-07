@@ -1,4 +1,4 @@
-function [G,D,err,derrdT] = sumobjectives_fmincon(obj, ints)
+function [G,D,err,derrdT,Happrox] = sumobjectives_fmincon(obj, ints)
 
 if isempty(ints)
     G = 0;
@@ -14,6 +14,7 @@ G = 0;
 D = zeros(nT,1);
 err = cell(size(ints));
 derrdT = cell(size(ints));
+Happrox = zeros(nT);
 isObjectiveZero = strcmp({obj.Type}, 'Objective.Data.Zero');
 isObjectiveZero = reshape(isObjectiveZero, size(obj));
 isPureLeastSquares = true;
@@ -44,19 +45,16 @@ for i_con = 1:n_con
                 ObjWeight_sqrt = sqrt(ObjWeight);
                 err_temp = ObjWeight_sqrt*obj(i_obj,i_con).err(ints(i_obj,i_con));
                 derrdT_temp = ObjWeight_sqrt*obj(i_obj,i_con).derrdT(ints(i_obj,i_con));
-                if isempty(derrdT_temp) && ~isObjectiveZero(i_obj,i_con)
-                    % If any nonzero objective functions do not have a
-                    % derrdT field, this isn't a pure least squares, and we
-                    % cannot use errors or their derivatives
-                    isPureLeastSquares = false;
-                    err = NaN;
-                    derrdT = NaN;
-                else
-                    nDataPoints_i = numel(err_temp);
+                nDataPoints_i = numel(err_temp);
+                if nDataPoints_i > 0
                     err{i_obj,i_con} = err_temp;
                     derrdT{i_obj,i_con} = zeros(nDataPoints_i, nT);
                     derrdT{i_obj,i_con}(:,TisExperiment) = derrdT_temp;
                 end
+            end
+            if nargout > 4
+                Happrox(TisExperiment,TisExperiment) = Happrox(TisExperiment,TisExperiment) ...
+                    + ObjWeight*obj(i_obj,i_con).d2GdT2_approximate(ints(i_obj,i_con));
             end
         end
         
@@ -68,8 +66,5 @@ if nargout > 2 && isPureLeastSquares
     err = vertcat(err{:});
     derrdT = vertcat(derrdT{:});
 end
-
-err = {err};
-derrdT = {derrdT};
 
 end

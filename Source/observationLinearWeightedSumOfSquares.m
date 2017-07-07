@@ -79,13 +79,34 @@ obs = pastestruct(observationZero(), obs);
         sim.sd = sd;
     end
 
-    function obj = objective(measurements)
+    function obj = objective(measurements, includeLogSdTerm)
+        if nargin < 2
+            includeLogSdTerm = [];
+        end
         measurements = vec(measurements);
         assert(numel(measurements) == n , 'KroneckerBio:observationWeightedSumOfSquares:measurements', 'Input "measurements" must be a vector length of "outputlist"')
-        obj = objectiveLinearWeightedSumOfSquares(outputlist, timelist, measurements, sd, name);
+        obj = objectiveLinearWeightedSumOfSquares(outputlist, timelist, measurements, sd, name, includeLogSdTerm);
     end
 
-    function obj = objectiveLinearWeightedSumOfSquares(outputlist, timelist, measurements, sd, name)
+    function obj = objectiveLinearWeightedSumOfSquares(outputlist, timelist, measurements, sd, name, includeLogSdTerm)
+        % Input arguments:
+        %   includeLogSdTerm [ boolean {true} ]
+        %       Set to true to include a log(sd) term in G that penalizes
+        %       larger values for the standard error. If the sd values are
+        %       constant with respect to the outputs, the term only
+        %       adds a constant value to the objective function and does
+        %       not change which parameter set is the optimum. Note that
+        %       this option does not change any of the information
+        %       theoretical functions (likelihood and Fisher information
+        %       functions).
+        if nargin < 6
+            includeLogSdTerm = [];
+        end
+            
+        if isempty(includeLogSdTerm)
+            includeLogSdTerm = true;
+        end
+        
         % Find unique timelist
         n = numel(outputlist);
         discrete_times = row(unique(timelist));
@@ -104,6 +125,18 @@ obs = pastestruct(observationZero(), obs);
         obj.derrdT = @derrdT;
         
         obj.dGdT = @dGdT;
+        obj.d2GdT2 = @d2GdT2;
+        obj.d2GdT2_approximate = @d2GdT2_approximate;
+        obj.yhash_delta = @yhash_delta;
+        if includeLogSdTerm
+            sigma_best = zeros(numel(outputlist),1);
+            for yi = 1:numel(outputlist)
+                sigma_best(yi) = sd(timelist(yi), outputlist(yi), measurements(yi));
+            end
+            obj.Gbest = 2*log(sigma_best);
+        else
+            obj.Gbest = 0;
+        end
         
         obj.p = @p;
         obj.logp = @logp;
@@ -120,8 +153,14 @@ obs = pastestruct(observationZero(), obs);
             [ybar, sigma] = evaluate_sol(outputlist, timelist, discrete_times, sd, int);
             e = ybar - measurements;
             
+            if includeLogSdTerm
+                logsdterm = 2*log(sigma);
+            else
+                logsdterm = 0;
+            end
+            
             % Goal function
-            val = sum(2 * log(sigma) + (e./sigma).^2);
+            val = sum(logsdterm + (e./sigma).^2);
             
             % Return discrete times as well
             discrete = discrete_times;
@@ -160,7 +199,12 @@ obs = pastestruct(observationZero(), obs);
                 
                 % Gradient value
                 e = ybar_t - measurements_t; % Y_
-                dGdybar = 2 ./ sigma_t .* dsigmady_t + 2 .* e .* (sigma_t - e.*dsigmady_t) ./ sigma_t.^3; % Y_
+                if includeLogSdTerm
+                    logsdterm = 2 ./ sigma_t .* dsigmady_t;
+                else
+                    logsdterm = 0;
+                end
+                dGdybar = logsdterm + 2 .* e .* (sigma_t - e.*dsigmady_t) ./ sigma_t.^3; % Y_
                 val = accumarray(outputlist_t, dGdybar, [ny,1]); % sum the entries associated with the same output
             else
                 val = zeros(ny, 1);
@@ -170,7 +214,13 @@ obs = pastestruct(observationZero(), obs);
         function val = dGdT(int)
             
             [dybardT, sigma, dsigmady] = evaluate_grad(outputlist, timelist, discrete_times, sd, int);
-            val = 2*err(int).'*derrdT(int) + (2./sigma.*dsigmady).'*dybardT;
+            if includeLogSdTerm
+                logsdterm = (2./sigma.*dsigmady).'*dybardT;
+            else
+                logsdterm = 0;
+            end
+            derrdT_i = derrdT(int);
+            val = 2*err(int).'*derrdT_i + logsdterm;
             val = val(:);
             
 %             val_test = zeros(size(val));
@@ -178,6 +228,11 @@ obs = pastestruct(observationZero(), obs);
 %                 val_test = val_test + dGdy(discrete_times(i), int).'*dybardT(timelist == discrete_times(i),:);
 %             end
             
+        end
+        
+        function val = d2GdT2_approximate(int)
+            val = derrdT(int);
+            val = 2*(val.'*val);
         end
         
         function val = derrdT(int)
@@ -217,11 +272,18 @@ obs = pastestruct(observationZero(), obs);
                     [sigma_t(i), dsigmady_t(i), d2sigmady2_t(i)] = sd(timelist_t(i), outputlist_t(i), ybar_t(i));
                 end
                 
+                if includeLogSdTerm
+                    logsdterm = -2./sigma_t.^2.*dsigmady_t.^2 + 2./sigma_t.*d2sigmady2_t;
+                else
+                    logsdterm = 0;
+                end
+                
                 % Curvature value
                 e = ybar_t - measurements_t;
                 d2Gdybar2 = 2 ./ sigma_t.^2 - 8 .* e ./ sigma_t.^3 .* dsigmady_t + ...
-                    (6 .* e.^2 ./ sigma_t.^4 - 2 ./ sigma_t.^2) .* dsigmady_t.^2 + ...
-                    (2 ./ sigma_t - 2 .* e.^2 ./ sigma_t.^3) .* d2sigmady2_t;
+                    (6 .* e.^2 ./ sigma_t.^4) .* dsigmady_t.^2 + ...
+                    (-2 .* e.^2 ./ sigma_t.^3) .* d2sigmady2_t ...
+                    + logsdterm;
                 val = accumarray(outputlist_t, d2Gdybar2, [ny,1]); % y_ % sum the entries associated with the same output
                 val = spdiags(val, 0, ny, ny); % y_y
             else
