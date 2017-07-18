@@ -1,9 +1,11 @@
-function [Obj,x0,A,b,Aeq,beq,vlb,vub,Con,Opts]=sqpcrkfmincon(Problem)
+function [Obj,x0,A,b,Aeq,beq,vlb,vub,Con,Opts,fgood,ggood]=sqpcrkfmincon(Problem)
 % SQP.m utility function to convert fmincon's Problem data structure
 % to input argument list for sqp.
 if isstruct(Problem)
-   Obj  = Problem.objective;
-   x0   = Problem.x0;
+   Obj   = Problem.objective;
+   x0    = Problem.x0;
+   fgood = Problem.fgood;
+   ggood = Problem.ggood;
    if isfield(Problem,'lb'), vlb = Problem.lb; else vlb=[]; end
    if isfield(Problem,'ub'), vub = Problem.ub; else vub=[]; end
    if isfield(Problem,'nonlcon'), Con  = Problem.nonlcon; else Con=[];  end

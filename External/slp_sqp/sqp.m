@@ -1,4 +1,4 @@
-function [x,opts,v,H,status]=sqp(Fun,x0,Opts,vlb,vub,Grd,varargin)
+function [x,opts,v,H,status]=sqp(Fun,x0,fgood,ggood,Opts,vlb,vub,Grd,varargin)
 % SQP    Schittkowski's Sequential Quadratic Programming method
 %        to find the constrained minimum of a function of several variables
 %
@@ -17,6 +17,15 @@ function [x,opts,v,H,status]=sqp(Fun,x0,Opts,vlb,vub,Grd,varargin)
 %                  constraints (i.e. [f,g]=fun(x)).  f is minimized
 %                  such that g<zeros(g). Set g=[] for unconstrained.
 %         x0     - initial vector of design variables
+%         fgood  - Value of the minimized function below which is considered a
+%                  "good" value. Once the function decreases below
+%                  this value, increases in the merit function will no
+%                  longer be allowed.
+%         ggood  - Value of the constraint function below which is
+%                  considered a "good" value. Once the minimized function
+%                  decreases below fgood and the constraints decrease below
+%                  this value, increases in the merit function will no
+%                  longer be allowed.
 %         Opts   - (optional) vector of program parameters, or optimset structure
 %                  opts(5)  - scale design variables if <0  (or opts.scale)
 %                             scale functions if f,g>abs(opts(5))
@@ -298,7 +307,7 @@ if nargin>1
    if nargin>21,error('Too many input arguments.'); end
 else
    Problem = Fun;
-   [Obj,x0,A,b,Aeq,beq,vlb,vub,Con,Opts]=sqpcrkfmincon(Problem);
+   [Obj,x0,A,b,Aeq,beq,vlb,vub,Con,Opts,fgood,ggood]=sqpcrkfmincon(Problem);
    Fun = @(x) fun2(x,Obj,Con,A,b,Aeq,beq);
    Grd = @(x) grd2(x,Obj,Con,A,Aeq);
    nargout_obj = nargout(Obj);
@@ -392,12 +401,16 @@ end
 if any( ~isreal(g0) | ~isfinite(g0) )
    error('Constraint values must be real')
 elseif isempty(g0)
-   g=-inf;
+   g=zeros(0,1);
 else
    g=g0(:);
 end
 ncs=length(g);lenv=ncs+lenvlb+lenvub;
 [mg,mj]=max([abs(g(1:nec));g(nec+1:ncs)]);
+if isempty(mg)
+    mg = -Inf;
+    mj = 0;
+end
 lb=(ncs+1:ncs+lenvlb)'; ub=(lenv-lenvub+1:lenv)';
 
 %% Check gradients
@@ -421,7 +434,9 @@ ACTIVE_CONSTRAINTS=[];
 %
 if UserHessian
    if isempty(v), v=guessLM(fp,gp,g,ncs,nec); end
-   H=feval(Opts.HessFun,xshape(x),v,varargin{:});
+   lambda.eqnonlin = v(1:nec);
+   lambda.ineqnonlin = v(nec+1:ncs);
+   H=feval(Opts.HessFun,xshape(x),lambda,varargin{:});
 elseif isempty(H)
    H=eye(ndv);
 else
@@ -446,6 +461,8 @@ if isempty(v)
    end
 elseif ncs<lenv && length(v)==ncs
    v=[v(:); zeros(lenv-ncs,1)];
+elseif ncs == 0 && length(v)==1
+    v = zeros(lenv,1);
 else
    v=v(:);
    if length(v)~=lenv
@@ -480,15 +497,18 @@ end
 % Initialize variables
 %
 nit=0;
-mu=1e-4;beta=1e-1;
-r=1e-2*ones(lenv,1);rub=1e9;rstep=10;s=[];
+mu=1e-4;beta=1e-1;%
+r=1e-2*ones(lenv,1);
+%rstep = 10; % Original value
+rstep = sqrt(2); % My value
+rub=1e9;s=[];
 rholb=1;rhoub=1e6;rhostep=100;rho=1;
 deltaub=.9;alpha=0;min_alpha=sqrt(eps);dx=0;ext_pen=0;aug='f';
 aeps=1.8*eps;pert=0;nopt=0;sqacc=sqrt(opts(3));
 maxstepsize = Opts.MaxStepSize;
-z0best = Inf;
-z0factor = 0.01;
+z0factor_bad = 0.01; z0best = Inf; z = Inf;
 dxlast = zeros(numel(x0),1); iszigzagging = false;
+merit = get_merit();
 fs='%5.0f %12.5g %9.3g %4.0f %10.3g %4.0f  %9.3g %9.3g';
 %---------------------------------------------------------------------
 % Display appropriate banner if opts(1)>0
@@ -516,7 +536,7 @@ if opts(1)>0
          ban3s=' KTO    max(S)';
       end
    end
-   ban4s = sprintf('%10s%10s%10s%10s', '|dx|', 'xlim', 'Dist x0', 'zigzag');
+   ban4s = sprintf('%10s%10s%10s%10s%12s%12s', '|dx|', 'xlim', 'Dist x0', 'zigzag', 'z0', 'z0best');
    disp([ban2s ban3s ban4s]);
 end
 
@@ -538,11 +558,22 @@ while nit<=opts(15)
 %        maxstepsize = Inf;
 %    end
     % Adjust max step size
-    if alpha == 1 && steplimitactive && z0 <= z0best && ~iszigzagging
+    if alpha == 1 && steplimitactive && ~iszigzagging
         maxstepsize = maxstepsize*1.41;
     elseif (alpha < 1 || iszigzagging) && nit > 1
         maxstepsize = maxstepsize/1.41;
     end
+    % Allow increases in the merit function when at least one of the
+    % objective or constraint values is not a good value
+    if f0 < fgood && (isempty(g) || all(g < ggood))
+        z0factor = 0;
+    else
+        z0factor = z0factor_bad;
+    end
+   if any(isinf(fp) | isnan(fp))
+       error('sqp:IntegrationTimeout', ...
+       'Infinite values were detected in the objective function. This indicates that the gradient calculation timed out when the objective calculation did not. Increase the integration timeout time period to avoid this error.')
+   end
    [s,u,statusqp,steplimitactive]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
    delta=0;sHsfail=0;z0p1fail=0;augfail=0;if aug=='f',nAS=0;end;aug='f';
    SCV=sum(abs(g(1:nec)))+sum(max(0,g(nec+1:ncs)));
@@ -559,11 +590,9 @@ while nit<=opts(15)
          r=min(rub,2*ncs*(u-v).^2/((s'*H*s)+(1-delta)));
          r=max(sigma,r);
       end
-      [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-      z0best = min(z0best, z0);
+      [z0,z0p1,~,~,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
       while z0p1>0 && max(r)<rub
-         [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-         z0best = min(z0best, z0);
+         [z0,z0p1,~,~,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
          if z0p1>0;r=r*rstep;end
       end
       z0p1fail=z0p1>0; % && (fp+gpv*u)'*s>0;
@@ -593,7 +622,8 @@ while nit<=opts(15)
          mod='t'; sHsfail=0;
          [sdelta,udelta,statusqp,steplimitactive]=qp([H zeros(ndv,1);zeros(1,ndv) rho],...
             [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1,maxstepsize);
-         s=sdelta(1:ndv);u=udelta(1:lenv);
+         s=sdelta(1:ndv);
+         if ~isempty(udelta); u = udelta(1:lenv); else u = zeros(lenv,1); end
          delta=sdelta(ndv+1);
          statusok = strcmp(statusqp(1:2),'ok');
          if statusok
@@ -611,8 +641,7 @@ while nit<=opts(15)
       %
       if aug=='f' && (sHsfail || delta>deltaub || ~statusok)
          aug='t'; nAS=nAS+1; sHsfail=0; delta=0;
-         [z0,z0p1,z0p2,z0p3]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-         z0best = min(z0best, z0);
+         [z0,z0p1,z0p2,z0p3,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
          [s,u1,statusqp,steplimitactive]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
          u=v+z0p3; u([lb ub])=u1;
          if ~(strcmp(statusqp(1:2),'ok') || strcmp(statusqp(1:3),'max'))
@@ -632,13 +661,11 @@ while nit<=opts(15)
          r=min(rub,2*ncs*(u-v).^2/((s'*H*s)+(1-delta)));
          r=max(sigma,r);
       end
-      [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-      z0best = min(z0best, z0);
+      [z0,z0p1,~,~,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
       z0p1fail=z0p1>=0;
       while z0p1fail && max(r)<=rub
          r=r*rstep;
-         [z0,z0p1]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-         z0best = min(z0best, z0);
+         [z0,z0p1,~,~,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
          z0p1fail=z0p1>=0;
       end
       if z0p1fail
@@ -683,7 +710,8 @@ while nit<=opts(15)
    else
        zigzagmetric = dx(:).'*dxlast(:)/(norm(dx)*norm(dxlast));
    end
-   iszigzagging = ~isnan(zigzagmetric) && zigzagmetric < 0;
+   zigzagcosthreshold = -Inf; % Set to -Inf to disable its effect on step size
+   iszigzagging = ~isnan(zigzagmetric) && zigzagmetric < zigzagcosthreshold;
    %
    % Display iteration info
    %
@@ -692,19 +720,19 @@ while nit<=opts(15)
       elseif mj>ncs, mj=mj-ncs; fs(38)='-';
       else, fs(38)=' ';
       end
-      fs_new = [fs '%10.3g%10.3g%10.3g%10.3g'];
+      fs_new = [fs '%10.3g%10.3g%10.3g%10.3g%12.3g%12.3g'];
       if opts(1)>3 && nit~=1
          disp(['ITERATION ' int2str(nit-1)]);% -1 to match Sch.
          disp([ban2s ban3s]);
       end
       if opts(6)==(-1)
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,SCV,KTO,norm(dx),maxstepsize,norm(x-x0),zigzagmetric,z0,z0best),trouble]);
       elseif opts(6)==1
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,AG/2,ms/2,norm(dx),maxstepsize,norm(x-x0),zigzagmetric,z0,z0best),trouble]);
       elseif opts(6)==2
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf),norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,norm(NLG,inf),norm(dx,inf),norm(dx),maxstepsize,norm(x-x0),zigzagmetric,z0,z0best),trouble]);
       else
-         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,KTO,ms,norm(dx),maxstepsize,norm(x-x0),zigzagmetric),trouble]);
+         disp([sprintf(fs_new,nfcn,f0,alpha,NAC,mg,mj,KTO,ms,norm(dx),maxstepsize,norm(x-x0),zigzagmetric,z0,z0best),trouble]);
       end
       trouble='';
    end
@@ -717,8 +745,7 @@ while nit<=opts(15)
    elseif opts(6)==1
       if ms/2<opts(2) && AG/2<opts(3) && mg<opts(4);v=u;break;end
    elseif opts(6)==2
-      [z0,z0p1,z0p2]=merit(v,r,nec,f,gv,fp,gpv,u,s);
-      z0best = min(z0best, z0);
+      [z0,z0p1,z0p2,~,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
       Slowed     = abs(f-z0)      < opts(3) && nit > 1 && ...
                    abs(f0-f0last) < opts(3) && max(abs(dx)) < opts(2);
       if (Slowed || norm(NLG,inf) < opts(3))&& mg < opts(4); v=u;break;end
@@ -727,10 +754,12 @@ while nit<=opts(15)
    end
    if max(abs(NLG))<sqacc && s'*H*s<opts(3)
       nopt=nopt+1;
-      if nopt==3
-         status='User termination criteria not met, but merit gradient is zero for 3 iterations.';
-         v=u; break
-      end
+      % Disabling this termination criterion because it is stopping
+      % constrained fits too early, possibly
+%       if nopt==3
+%          status='User termination criteria not met, but merit gradient is zero for 3 iterations.';
+%          v=u; break
+%       end
    else
       nopt=0;
    end
@@ -757,8 +786,16 @@ while nit<=opts(15)
    % Evaluate the merit function at alpha=1
    xold=x;vold=v;v=u;leastmg=mg;mg0=mg;g0=g;ext_pen=0;best=0;nlin=0;alpha=1;
    if ~(augfail || z0p1fail)
-      x=xold+alpha*s;
-      [f0,g]=fun(x); nfcn=nfcn+1;
+      
+      badx = true;
+      while badx
+          x=xold+alpha*s;
+          [f0,g]=fun(x); nfcn=nfcn+1;
+          badx = isnan(f0) || isinf(f0) || any(isnan(g)) || any(isinf(g));
+          if badx
+              s = s./2;
+          end
+      end
       [f,g,gv,Best]=scalefg( f0, g, scf, scg, lscg, x, vlb, vub, ilb, iub, u, opts(4), Best );
       %
       % Establish the termination criteria
@@ -767,11 +804,15 @@ while nit<=opts(15)
       minalpha = min( opts(2)/max(abs(s)), minalpha );
       while z>(z0best+z0factor*abs(z0best))+mu*alpha*z0p1 && nlin<nlinmax && alpha>minalpha
          nlin=nlin+1;
+         if isinf(z) || isnan(z)
+             alpha = alpha/10;
+         else
+             a2=((z-z0)/alpha-z0p1)/alpha;
+             alpha=max([beta*alpha,-z0p1/2/a2,minalpha]);
+         end
          %
          % Use 2pt quadradic approx to minimize the merit function
          %
-         a2=((z-z0)/alpha-z0p1)/alpha;
-         alpha=max([beta*alpha,-z0p1/2/a2,minalpha]);
          x=xold+alpha*s;v=vold+alpha*(u-vold);
          [f0,g]=fun(x); nfcn=nfcn+1;
          [f,g,gv,Best]=scalefg( f0, g, scf, scg, lscg, x, vlb, vub, ilb, iub, v, opts(4), Best );
@@ -803,8 +844,8 @@ while nit<=opts(15)
       minalpha = min( 1, max( opts(2)/max(abs(s)), alpha ) );
 %     s = qp([],gp*vlm,[],[],slb(1:lenvlb),sub(1:lenvub),s,nec,-1);
       [s,u1,~,steplimitactive] = qp(eye(ndv)/minalpha,gp*vlm,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
+      % I don't think we want to use this evaluation as a possible best z0
       [z0,z0p1] = merit(vlm,[],nec,[],g0,[],gp,[],s); % exterior penalty
-      z0best = min(z0best, z0);
       if max(abs(s))>eps && z0>eps
          u=[vlm; u1];
       else
@@ -829,6 +870,7 @@ while nit<=opts(15)
       end
       while z0p1fail && nlin<nlinmax2 && alpha>minalpha
          nlin=nlin+1;
+         
          a2=((z-z0)/alpha-z0p1)/(alpha);
          alpha=max([beta*alpha,-z0p1/2/a2,minalpha]);
          x=xold+alpha*s; v=vold+alpha*(u-vold);
@@ -843,8 +885,9 @@ while nit<=opts(15)
       end
    end
    if nAS>=3 && leastmg>Best.mg
-      status='Augmented Search direction failed after 3 tries.';
-      break
+       % The step size limit makes this an annoying termination criterion
+%       status='Augmented Search direction failed after 3 tries.';
+%       break
    elseif z0p1fail
       if leastmg < mg0
          alpha=best; f=bestf; gv=bestgv; g=bestgv(1:ncs); x=bestx; s=x-xold;
@@ -857,6 +900,10 @@ while nit<=opts(15)
       end
    end
    [mg,mj]=max([abs(g(1:nec)); g(nec+1:ncs); gv(ncs+1:lenv)]);
+   if isempty(mg)
+       mg = -Inf;
+       mj = 0;
+   end
    if nfcn>opts(14)
       status='Maximum # function evaluations exceeded. Increase opts(14).'; break
    elseif nit>opts(15)
@@ -910,7 +957,13 @@ while nit<=opts(15)
    % Update the Hessian using Powell's modified BFGS method
    %
    if UserHessian
-      H=feval(Opts.HessFun,xshape(x),v,varargin{:});
+      lambda.eqnonlin = v(1:nec);
+      lambda.ineqnonlin = v(nec+1:ncs);
+      H=feval(Opts.HessFun,xshape(x),lambda,varargin{:});
+      if any(isnan(H(:)))
+        error('sqp:HessianNaNs', ...
+            'NaNs detected in the Hessian. Likely an integration timed out for the gradient calculation. Try increasing the integration timeout time.')
+      end
       if scdv, H=diag(x1)*H*diag(x1); end;
    else
       Hdx=H*dx;
@@ -1015,7 +1068,7 @@ end
 
 
 %% Sub-function to evaluate the descent merit function
-function [psi,psip1,psip2,psip3]=merit(v,r,nec,f,g,fp,gp,u,s)
+function merit_fun=get_merit()
 %
 % MERIT     Evaluates the merit function associated with the line
 %           search in sqp.m.
@@ -1050,62 +1103,84 @@ function [psi,psip1,psip2,psip3]=merit(v,r,nec,f,g,fp,gp,u,s)
 % 8/12/99 - Fix MatLab 5.2 compilation warnings (RAC)
 % 3/27/07 - Null r is for L1 exterior penalty
 
-if nargin<9 && nargout>1
-   error('merit - 9 input arguments must be provided to compute psip1-3.')
-end
-if nargin<5;error('merit - 5 input arguments must be provided.'); end
-
-% L1 Exterior penalty for infeasible designs
-if isempty(r)
-   ncs = length(v);
-   v = v.*(g(1:ncs)>0&v>0 | (1:ncs)'<=nec); % positive multipliers for ineq.
-   psi = abs(v)'*[abs(g(1:nec)); max(0,g(nec+1:ncs))];
-   if nargout>1
-      psip1 = s'*gp*v;
-   end
-   return
-end
- 
-% Switch signs on g and gp to match Schittkowski's conventions
-g=-g;
-if nargin>5;gp=-gp; end
-
-% Determine the active(a) and inactive(i) constraints
-ncs=size(v,1);
-a=find(g(nec+1:ncs)<=v(nec+1:ncs)./r(nec+1:ncs));a=[1:nec a'+nec];
-i=find(g(nec+1:ncs)>v(nec+1:ncs)./r(nec+1:ncs));i=i+nec;
-
-% Evaluate the merit function
-if isempty(a) && isempty(i)
-   psi=f;
-elseif isempty(a)
-   psi=f-sum(.5*(v.^2)./r);
-elseif isempty(i)
-   psi=f-(v'*g-.5*r'*g.^2);
-else
-   psi=f-sum(.5*(v(i).^2)./r(i))-(v(a)'*g(a)-.5*r(a)'*g(a).^2);
-end
-
-% Evaluate psip1, psip2 and psip3
-if nargout>1
-psip3=zeros(ncs,1);
-   if isempty(a) && isempty(i)
-      psip2=fp;
-      psip1=fp'*s;
-   elseif isempty(a)
-      psip3=-(v./r);
-      psip2=fp;
-      psip1=psip2'*s+psip3'*(u-v);
-   elseif isempty(i)
-      psip3=-g;
-      psip2=fp-gp*(v-r.*g);
-      psip1=psip2'*s+psip3'*(u-v);
-   else
-      psip3(i)=-v(i)./r(i);psip3(a)=-g(a);
-      psip2=fp-gp(:,a)*(v(a)-r(a).*g(a));
-      psip1=psip2'*s-(v(i)./r(i))'*(u(i)-v(i))-g(a)'*(u(a)-v(a));
-   end
-end
+    [vbest,fbest,gbest,fpbest,gpbest,ubest,sbest] = deal([]);
+    merit_fun = @merit_inner;
+    
+    function [psi,psip1,psip2,psip3,psi_best] = merit_inner(v,r,nec,f,g,fp,gp,u,s)
+        if nargin<9 && nargout>1
+            error('merit - 9 input arguments must be provided to compute psip1-3.')
+        end
+        if nargin<5;error('merit - 5 input arguments must be provided.'); end
+        
+        % L1 Exterior penalty for infeasible designs
+        if isempty(r)
+            ncs = length(v);
+            v = v.*(g(1:ncs)>0&v>0 | (1:ncs)'<=nec); % positive multipliers for ineq.
+            psi = abs(v)'*[abs(g(1:nec)); max(0,g(nec+1:ncs))];
+            if nargout>1
+                psip1 = s'*gp*v;
+            end
+            return
+        end
+        
+        % Switch signs on g and gp to match Schittkowski's conventions
+        g=-g;
+        if nargin>5;gp=-gp; end
+        
+        % Determine the active(a) and inactive(i) constraints
+        ncs=size(v,1);
+        a=find(g(nec+1:ncs)<=v(nec+1:ncs)./r(nec+1:ncs));a=[1:nec a'+nec];
+        i=find(g(nec+1:ncs)>v(nec+1:ncs)./r(nec+1:ncs));i=i+nec;
+        
+        % Evaluate the merit function
+        if isempty(a) && isempty(i)
+            psi=f;
+        elseif isempty(a)
+            psi=f-sum(.5*(v.^2)./r);
+        elseif isempty(i)
+            psi=f-(v'*g-.5*r'*g.^2);
+        else
+            psi=f-sum(.5*(v(i).^2)./r(i))-(v(a)'*g(a)-.5*r(a)'*g(a).^2);
+        end
+        
+        % Evaluate psip1, psip2 and psip3
+        if nargout>1
+            psip3=zeros(ncs,1);
+            if isempty(a) && isempty(i)
+                psip2=fp;
+                psip1=fp'*s;
+            elseif isempty(a)
+                psip3=-(v./r);
+                psip2=fp;
+                psip1=psip2'*s+psip3'*(u-v);
+            elseif isempty(i)
+                psip3=-g;
+                psip2=fp-gp*(v-r.*g);
+                psip1=psip2'*s+psip3'*(u-v);
+            else
+                psip3(i)=-v(i)./r(i);psip3(a)=-g(a);
+                psip2=fp-gp(:,a)*(v(a)-r(a).*g(a));
+                psip1=psip2'*s-(v(i)./r(i))'*(u(i)-v(i))-g(a)'*(u(a)-v(a));
+            end
+        end
+        
+        % Reevaluate the best merit function value observed so far for the
+        % current value of r
+        if nargout > 4
+            bestNotAssigned = isempty(fbest);
+            if bestNotAssigned
+                [vbest,fbest,gbest,fpbest,gpbest,ubest,sbest] = deal(v,f,-g,fp,-gp,u,s);
+                psi_best = psi;
+            else
+                psi_best = merit_inner(vbest,r,nec,fbest,gbest,fpbest,gpbest,ubest,sbest);
+                if psi < psi_best
+                    % Store the current values if it is the best observed
+                    [vbest,fbest,gbest,fpbest,gpbest,ubest,sbest] = deal(v,f,-g,fp,-gp,u,s);
+                    psi_best = psi;
+                end
+            end
+        end
+    end
 end
 
 
@@ -1114,9 +1189,13 @@ end
 function [f,g,gv,Best]=scalefg( f0, g0, scf, scg, lscg, x, vlb, vub, ilb, iub, v, tolcon, Best )
 % Modified:  5/12/06 - allow empty g
 %           12/11/07 - Track best design
-if isempty(g0), g0=-inf; end
+%if isempty(g0), g0=-inf; end
 g=g0(:);
 [mg,mj]=max(g);
+if isempty(mg)
+    mg = -Inf;
+    mj = 0;
+end
 if nargin<13 || Best.mg>tolcon && mg<Best.mg || mg<=tolcon && f0<Best.Obj
    Best.Obj = f0;
    Best.LM  = v;
@@ -1140,7 +1219,7 @@ end
 %% Sub-function to scale objective gradient, fp, and constraint gradients, gp
 function [fp,gp,gpv]=scalefgp( fp, gp, scf, scg, lscf, lscg, scdv, x1, lenvlb, lenvub )
 ndv=length(fp);
-if isempty(gp) || (length(gp)==1 && gp==0), gp=zeros(ndv,1); end % unconstrained problem
+%if isempty(gp) || (length(gp)==1 && gp==0), gp=zeros(ndv,1); end % unconstrained problem
 if lscf, fp=scf*fp; end
 if lscg, gp=(ones(ndv,1)*scg') .* gp; end
 if scdv

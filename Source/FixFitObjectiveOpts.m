@@ -43,10 +43,13 @@ defaultOpts.ScaleConstraints                = false;
 
 defaultOpts.UseImprovedHessianApprox = true;
 defaultOpts.HessianApproxMaximumConditionNumber = Inf;
-defaultOpts.ApproximateSecondOrderHessianTerm = true;
+defaultOpts.ApproximateSecondOrderHessianTerm = false;
 defaultOpts.HessianApproximation = 'bfgs';
 defaultOpts.SubproblemAlgorithm = 'factorization';
 defaultOpts.HessianGuess = 'I';
+
+defaultOpts.GoodObjectiveFunctionValue = [];
+defaultOpts.GoodConstraintFunctionValues = [];
 
 defaultOpts.UseAdjoint = false;
 
@@ -241,6 +244,31 @@ else
     funopts.HessianMaximumConditionNumber = opts.HessianApproxMaximumConditionNumber;
 end
 funopts.ApproximateSecondOrderHessianTerm = opts.ApproximateSecondOrderHessianTerm;
+
+% Determine the number of data points to estimate a "good" objective function
+% value and constraint values, if one wasn't provided
+if isempty(opts.GoodObjectiveFunctionValue)
+    errs = ObjectiveErrors(m, con, obj);
+    nDataPoints = numel(errs);
+    opts.GoodObjectiveFunctionValue = chi2inv(0.95, nDataPoints);
+    if opts.GoodObjectiveFunctionValue == 0
+        warning('No objective function value was provided. Assuming objective function value should not factor into whether the objective function is allowed to increase.')
+        opts.GoodObjectiveFunctionValue = Inf;
+    end
+end
+if isempty(opts.GoodConstraintFunctionValues)
+    errs_cons = cell(size(opts.ConstraintObj));
+    for i = 1:numel(errs_cons)
+        errs_cons{i} = ObjectiveErrors(m, con, opts.ConstraintObj{i});
+    end
+    nDataPoints = cellfun(@numel, errs_cons);
+    opts.GoodConstraintFunctionValues = chi2inv(0.95, nDataPoints);
+    noLeastSquares = opts.GoodConstraintFunctionValues == 0;
+    if any(noLeastSquares)
+        warning('Some constraint functions were not provided examples of good values. Assuming constraint values should not factor into whether the objective function should be allowed to increase.')
+        opts.GoodConstraintFunctionValues(noLeastSquares) = Inf;
+    end
+end
 
 %% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%% Halt optimization on terminal goal %%%%%

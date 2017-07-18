@@ -58,7 +58,7 @@ else
       options=optimset(options,'Algorithm','active-set');
       [s,f,exitflag,output,LAMBDA]=quadprog(H,fp,[A(p2,:);A_slim],[b(p2);b_slim],...
          A(p1,:),b(p1),vlb,vub,x0,options);
-   elseif exitflag==-6
+   elseif exitflag==-6 || exitflag==0
       if isempty(s), s=zeros(size(fp)); end
       HessianFcn = @(x,lambda) H;
       options = optimoptions(@fmincon,'SpecifyObjectiveGradient', true,...
@@ -82,7 +82,7 @@ if exitflag>=0
    if ~isempty(vlb),            u=[u;LAMBDA.lower(1:length(vlb))]; end
    if ~isempty(vub),            u=[u;LAMBDA.upper(1:length(vub))]; end
 end
-steplimitactive = any(abs(V.'*s) >= 0.999*max_s);
+steplimitactive = ~isempty(max_s) && any(abs(V.'*s) >= 0.999*max_s);
 %%Added -1 conditions to handle MOSEK exitflags
 %  if exitflag==-1
 %     status='ok';

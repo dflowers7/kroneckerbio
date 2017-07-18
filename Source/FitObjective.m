@@ -174,6 +174,8 @@ function [m, con, G, D, exitflag, output] = FitObjective(m, con, obj, opts)
 %           Sets an upper limit to the amount of time an integration may
 %           take. Any integration taking longer than this throws an error.
 %           If empty (the default), no upper limit is set.
+%       .GoodObjectiveFunctionValue
+%       .GoodConstraintFunctionValues
 %       .GlobalOptimization [ logical scalar {false} ]
 %           Use global optimization in addition to fmincon
 %       .GlobalOpts [ options struct scalar {} ]
@@ -340,6 +342,8 @@ for iRestart = 1:opts.Restart+1
                 [That,G,~,exitflag, output, ~, D] = lsqnonlin(objective, That, opts.LowerBound, opts.UpperBound, localOpts);
             case 'sqp'
                 localProblem.options = localOpts;
+                localProblem.fgood   = opts.GoodObjectiveFunctionValue;
+                localProblem.ggood   = opts.GoodConstraintFunctionValues;
                 [That, output, ~, ~, exitflag] = sqp(localProblem);
                 % output(8)  = value of the function at the solution
                 % output(10) = number of function evaluations

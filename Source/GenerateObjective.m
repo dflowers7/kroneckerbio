@@ -78,7 +78,7 @@ if isempty(objectiveFunction)
         case 'lsqnonlin'
             objectiveFunction = @concatobjectives_lsqnonlin;
         case 'sqp'
-            objectiveFunction = @sumobjectives_fmincon;
+            objectiveFunction = @(obj,ints)regularizedleastsquares_fmincon(obj,ints,1e-3);
     end
 end
 
@@ -104,7 +104,7 @@ if isempty(funopts)
     funopts = struct;
 end
 defaultFunOpts.ScaleConstraints = false;
-defaultFunOpts.HessianMaximumConditionNumber = 1000;
+defaultFunOpts.HessianMaximumConditionNumber = Inf;
 funopts = mergestruct(defaultFunOpts, funopts);
 
 % Extract and check funopts fields
@@ -280,12 +280,15 @@ gs_last_hess_possible = [];
 errs_last_hess_possible = [];
 derrdTs_last_hess_possible = [];
 As_last_hess_possible = [];
+H_last_possible = [];
 T_last_hess = [];
 gs_last_hess = [];
 errs_last_hess = [];
 derrdTs_last_hess = [];
 As_last_hess = [];
+H_last = [];
 max_hess_condno = funopts.HessianMaximumConditionNumber;
+useA = funopts.ApproximateSecondOrderHessianTerm;
 isExactHessian = [];
 hasLeastSquares = [];
 
@@ -510,28 +513,33 @@ updateoptsfun = @updateOpts;
                 obj_all_cell(~isobjective) = constr_obj(index(~isobjective));
                 int_cell = mat2cell(int, cellfun(@(x)size(x,1), obj_all_cell), n_con);
                 
+                % General fields needed for both objectives and constraints
+                % that only need to be reassigned after a new integration
+                for i = 1:n_con
+                    for k = 1:size(int_cell,1)
+                        [int_cell{k}(:,i).TisExperiment] = deal(TisExperiment(:,i));
+                        [int_cell{k}(:,i).T] = deal(T(TisExperiment(:,i)));
+                        [int_cell{k}(:,i).nT] = deal(sum(TisExperiment(:,i)));
+                    end
+                end
             end
             
             % Add other fields needed
-            ObjWeights = num2cell(opts.ObjWeights);
+            ObjWeights = opts.ObjWeights;
             isobjective_i = find(isobjective);
             isconstraint_i = find(~isobjective);
             % Special fields for objectives
             for oi = isobjective_i(:).'
-                [int_cell{oi}.ObjWeight] = deal(ObjWeights{:});
+                for ici = 1:numel(int_cell{oi})
+                    int_cell{oi}(ici).ObjWeight = ObjWeights(ici);
+                end
             end
             % Special fields for constraints
             for ci = isconstraint_i(:).'
                 [int_cell{ci}.ObjWeight] = deal(1); % Use weights of 1 for constraints. No support for varying ObjWeights for constraints at this point.
             end
-            % General fields needed for both objectives and constraints
-            for i = 1:n_con
-                for k = 1:size(int_cell,1)
-                    [int_cell{k}(:,i).TisExperiment] = deal(TisExperiment(:,i));
-                    [int_cell{k}(:,i).T] = deal(T(TisExperiment(:,i)));
-                    [int_cell{k}(:,i).nT] = deal(sum(TisExperiment(:,i)));
-                end
-            end
+            
+            
             
             prevint = int_cell;
             prev_obj_all_cell = cell(numel(index),1);
@@ -580,7 +588,20 @@ updateoptsfun = @updateOpts;
         end
         isobjective = true;
         integrfun_i = min(nargout_, 2);
-        int = integr(T, integrateFunctions_objective(integrfun_i,:), isobjective, 1);
+        try
+            int = integr(T, integrateFunctions_objective(integrfun_i,:), isobjective, 1);
+        catch ME
+            if strcmp(ME.identifier, 'KroneckerBio:timeoutOutputFunction:IntegrationTimeout')
+                G = Inf;
+                D = nan(nT, 1);
+                err = [];
+                derrdT = [];
+                Happrox = nan(nT, nT);
+                return
+            else
+                rethrow(ME)
+            end
+        end
         
         varargout = cell(nargout_,1);
         [varargout{:}] = objectiveFunction(obj, int);
@@ -635,18 +656,49 @@ updateoptsfun = @updateOpts;
         integrfun_i = min(nargout_, 4);
         for i = 1:nconstraintfuns
             index = i;
-            int_i = integr(T, integrateFunctions_constraint{i}(integrfun_i,:), isobjective, index);
+            try
+                int_i = integr(T, integrateFunctions_constraint{i}(integrfun_i,:), isobjective, index);
+            catch ME
+                if strcmp(ME.identifier, 'KroneckerBio:timeoutOutputFunction:IntegrationTimeout')
+                    c = inf(nconstraintfuns,1);
+                    ceq = [];
+                    GC = inf(nT, nconstraintfuns);
+                    GCeq = [];
+                    err = cell(nconstraintfuns,1);
+                    derrdT = cell(nconstraintfuns,1);
+                    Happrox = repmat({nan(nT, nT)}, nconstraintfuns, 1);
+                    return
+                else
+                    rethrow(ME)
+                end
+            end
             if nargout_ < 3
                 [c{i},ceq{i}] = constraintFunctions{i}(constr_obj{i}, int_i);
             else
                 [c{i},ceq{i},GC{i},GCeq{i},err{i},derrdT{i},Happrox{i}] = constraintFunctions{i}(constr_obj{i}, int_i);
+                if ~iscell(err{i})
+                    err{i} = err(i);
+                end
+                if ~iscell(derrdT{i})
+                    derrdT{i} = derrdT(i);
+                end
+                if ~iscell(Happrox{i})
+                    Happrox{i} = Happrox(i);
+                end
             end
+           
 %             for j = 1:nargout_
 %                 if ~isempty(out_i{j})
 %                     varargout{j}{i} = out_i{j};
 %                 end
 %             end
         end
+        
+        % Expand cell outputs for those constraint functions returning
+        % more than one constraint value
+        err = vertcat(err{:});
+        derrdT = vertcat(derrdT{:});
+        Happrox = vertcat(Happrox{:});
         
         % Concatenate constraint function values across constraint
         % functions
@@ -696,7 +748,7 @@ updateoptsfun = @updateOpts;
                     GCeq = bsxfun(@rdivide, GCeq, abs(constr_vals(:).'));
                 end
                 if nargout_ > 4
-                    for k = 1:nconstraintfuns
+                    for k = 1:numel(err)
                         if ~isempty(err{k})
                             err{k} = err{k}./sqrt(abs(constr_vals(k)));
                         end
@@ -726,12 +778,7 @@ updateoptsfun = @updateOpts;
 
     function H = hessian_approximation(T, lambda)
         
-        % If is a struct, extract the constraint
-        if isstruct(lambda)
-            lc_constr = lambda.ineqnonlin(:);
-        else
-            lc_constr = lambda(:);
-        end
+        lc_constr = lambda.ineqnonlin(:);
         
         % Calculate new gradients and get Lagrange multipliers
         [~, g_obj, err_obj, derrdT_obj, Happrox_obj] = objective(T);
@@ -753,6 +800,14 @@ updateoptsfun = @updateOpts;
         derrdTs = [derrdT_obj; derrdT_constr];
         Happroxs = [Happrox_obj; Happrox_constr];
 
+        % If a timeout occurred, just use the last Hessian we calculated,
+        % and don't save any intermediate variables
+        skipThisHessian = any(isnan(vertcat(gs{:})));
+        if skipThisHessian
+            H = H_last;
+            return
+        end
+        
         % Determine which objective functions have least squares terms
         % involved
         if isempty(hasLeastSquares)
@@ -763,25 +818,35 @@ updateoptsfun = @updateOpts;
         % approximations (such as for priors, where the calculation of the
         % exact Hessian is fast)
         if isempty(isExactHessian)
-            isExactHessian = false(numel(gs), 1);
-            for i = 1:numel(gs)
-                if i == 1
-                    isObjZero = strcmp({obj.Type}, 'Objective.Data.Zero');
-                    isExactHessian(i) = all([obj.approximateIsExactHessian] | isObjZero);
-                else
-                    isObjZero = strcmp({constr_obj.Type}, 'Objective.Data.Zero');
-                    isExactHessian(i) = all([constr_obj{i-1}.approximateIsExactHessian] | isObjZero);
-                end
-            end
+            % Hacking this out for now
+            isExactHessian = false(numel(hasLeastSquares),1);
         end
+%         if isempty(isExactHessian)
+%             isExactHessian = false(numel(gs), 1);
+%             for i = 1:numel(gs)
+%                 if i == 1
+%                     isObjZero = strcmp({obj.Type}, 'Objective.Data.Zero');
+%                     isExactHessian(i) = all([obj.approximateIsExactHessian] | isObjZero);
+%                 else
+%                     isObjZero = strcmp({constr_obj{i-1}.Type}, 'Objective.Data.Zero');
+%                     isExactHessian(i) = all([constr_obj{i-1}.approximateIsExactHessian] | isObjZero);
+%                 end
+%             end
+%         end
         
         % Initialize last iteration terms
         if isempty(T_last_hess)
             gs_last_hess_possible = gs;
             errs_last_hess_possible = errs;
             derrdTs_last_hess_possible = derrdTs;
-            As_last_hess_possible = repmat({1e-3*eye(nT)}, numel(gs), 1);
-            As_last_hess_possible(isExactHessian) = {zeros(nT)};
+            if ~useA
+                As_last_hess_possible = repmat({zeros(nT)}, numel(gs), 1);
+                needsA = ~hasLeastSquares & ~isExactHessian;
+                As_last_hess_possible(needsA) = repmat({1e-3*eye(nT)}, sum(needsA), 1);
+            else
+                As_last_hess_possible = repmat({1e-3*eye(nT)}, numel(gs), 1);
+                As_last_hess_possible(isExactHessian) = {zeros(nT)};
+            end
             
             H = zeros(nT);
             for i = 1:numel(Happroxs)
@@ -837,7 +902,7 @@ updateoptsfun = @updateOpts;
             eigvec_scaled = eigvec*diag(sqrt(eigval));
             B_s = eigvec_scaled*eigvec_scaled.';
             
-            if norm(s) < 1e-30
+            if norm(s) < 1e-30 || (~useA && hasLeastSquares(i)) % This isn't perfect because ideally I want to not update A only for pure least squares objective functions
                 del = zeros(nT);
             else
                 temp = (s.'*eigvec)*diag(sqrt(eigval));
@@ -878,6 +943,7 @@ updateoptsfun = @updateOpts;
         errs_last_hess_possible = errs;
         derrdTs_last_hess_possible = derrdTs;
         As_last_hess_possible = As;
+        H_last_possible = H;
         
         if updateHessianVarsInHessFun
             T_last_hess = T;
@@ -885,6 +951,7 @@ updateoptsfun = @updateOpts;
             errs_last_hess = errs_last_hess_possible;
             derrdTs_last_hess = derrdTs_last_hess_possible;
             As_last_hess = As_last_hess_possible;
+            H_last = H_last_possible;
         end
         
     end
@@ -895,11 +962,12 @@ updateoptsfun = @updateOpts;
         % to update the values except at the conclusion of an iteration
         switch state
             case 'iter'
-                T_last_hess = T;
+                T_last_hess = x;
                 gs_last_hess = gs_last_hess_possible;
                 errs_last_hess = errs_last_hess_possible;
                 derrdTs_last_hess = derrdTs_last_hess_possible;
                 As_last_hess = As_last_hess_possible;
+                H_last = H_last_possible;
         end
         stop = other_outfun(x, optimValues, state);
     end
