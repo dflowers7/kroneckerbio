@@ -1,4 +1,4 @@
-function [s,u,status,steplimitactive]=qp(H,fp,A,b,vlb,vub,x0,neq,nomsg,max_s)
+function [s,u,status,steplimitactive]=qp(H,fp,A,b,vlb,vub,x0,neq,nomsg,max_s,ndv)
 % QP converts old optimization toolbox qp calling sequence to new quadprog
 % calling sequence in version 2 and later of the optimization toolbox.
 %
@@ -13,11 +13,18 @@ function [s,u,status,steplimitactive]=qp(H,fp,A,b,vlb,vub,x0,neq,nomsg,max_s)
 %  11/16/15 - default quadprog no "s" for infeasible--revert to active-set
 %  11/25/16 - active-set algorithm removed for R2106b
 
-if nargin < 10
-    max_s = [];
+if nargin < 11
+    ndv = [];
+    if nargin < 10
+        max_s = [];
+    end
 end
 
-[nc,nx]=size(A);
+nc=size(A,1);
+nx = numel(fp);
+if isempty(ndv)
+    ndv = nx;
+end
 neq=min(neq,nc);
 MaxIter=max(200,10*min(nx,100));
 % Rows of A are partitioned into equality and inequality constraints: p1, p2
@@ -39,15 +46,27 @@ end
 
 % Set additional lower and upper bounds to reflect limits in allowed step size for
 % each variable
-nx = numel(fp);
 if isempty(max_s)
     A_slim = zeros(0,nx);
     b_slim = zeros(0,1);
 else
-    [~,~,V] = svd(H);
+    [~,~,V] = svd(H(1:ndv,1:ndv));
+    V = [V; zeros(nx-ndv,size(V,2))];
     A_slim = [-V.'; V.'];
-    b_slim = repmat(max_s, 2*nx, 1);
+    b_slim = repmat(max_s, 2*ndv, 1);
 end
+
+% EXPERIMENTAL: Regularize the equality and inequality constraints
+% minSingVal = 1e-3;
+% regularizeConstraints = true;
+% if regularizeConstraints
+%     % Inequality constraints
+%     [uineq,sineq,vineq] = svd(A(p2,:));
+%     for i = 1:min(size(sineq))
+%         sineq(i,i) = max(sineq(i,i), minSingVal);
+%     end
+%     A(p2,:) = uineq*sineq*vineq.';
+% end
 
 if isempty(H)
    [s,f,exitflag,output,LAMBDA]=linprog(fp,[A(p2,:);A_slim],[b(p2);b_slim],A(p1,:),b(p1),vlb,vub,x0,options);

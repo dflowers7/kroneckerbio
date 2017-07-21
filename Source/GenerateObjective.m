@@ -913,7 +913,20 @@ updateoptsfun = @updateOpts;
                 del = (temp2 + temp2.')/(v.'*s) + (temp.'*s)*(v*v.')/(v.'*s).^2;
             end
             
-            As{i} = As_last_hess{i} + del;
+%             if isempty(del_history)
+%                 del_memory = 10;
+%                 del_history = zeros(nT,nT,del_memory);
+%                 del_i = 1;
+%             end
+%             del_history(:,:,del_i) = del;
+%             del_remove = del_history(:,:,del_i+1);
+%             del_i = del_i + 1;
+%             if del_i > del_memory
+%                 del_i = 1;
+%             end
+    
+            forgetfactor = 0.64;
+            As{i} = forgetfactor*As_last_hess{i} + del;
             
             Bs{i} = As{i} + Happroxs{i};
         end
@@ -927,7 +940,8 @@ updateoptsfun = @updateOpts;
         % Correct eigenvalues to be above minimum threshold defined by
         % minimum condition number
         [eigvecs,eigvals] = eig(H, 'vector');
-        eigvals = abs(real(eigvals));
+        %eigvals = abs(real(eigvals));
+        eigvals = real(eigvals);
         min_hess_eigval = max(eigvals)/max_hess_condno;
         eigvals(eigvals < min_hess_eigval) = min_hess_eigval;
         eigvecs_scaled = eigvecs*diag(sqrt(eigvals));

@@ -437,6 +437,11 @@ if UserHessian
    lambda.eqnonlin = v(1:nec);
    lambda.ineqnonlin = v(nec+1:ncs);
    H=feval(Opts.HessFun,xshape(x),lambda,varargin{:});
+   
+%    mineigval = 1e-3;
+%    [eigvec,eigval] = eig(H, 'vector');
+%    eigval(eigval < mineigval) = mineigval;
+%    H = eigvec*diag(eigval)*eigvec.';
 elseif isempty(H)
    H=eye(ndv);
 else
@@ -499,11 +504,14 @@ end
 nit=0;
 mu=1e-4;beta=1e-1;%
 r=1e-2*ones(lenv,1);
-%rstep = 10; % Original value
-rstep = sqrt(2); % My value
+rstep = 10; % Original value
+%rstep = sqrt(2); % My value
 rub=1e9;s=[];
 rholb=1;rhoub=1e6;rhostep=100;rho=1;
-deltaub=.9;alpha=0;min_alpha=sqrt(eps);dx=0;ext_pen=0;aug='f';
+deltaub=.9; % Original value
+%deltaub = 1 - 1e-4; % My value
+sigma_delay = 0; % Number of iterations to allow decreases in the penalty parameter. Original value would be 0
+alpha=0;min_alpha=sqrt(eps);dx=0;ext_pen=0;aug='f';
 aeps=1.8*eps;pert=0;nopt=0;sqacc=sqrt(opts(3));
 maxstepsize = Opts.MaxStepSize;
 z0factor_bad = 0.01; z0best = Inf; z = Inf;
@@ -558,11 +566,17 @@ while nit<=opts(15)
 %        maxstepsize = Inf;
 %    end
     % Adjust max step size
-    if alpha == 1 && steplimitactive && ~iszigzagging
+    if alpha == 1 && steplimitactive %&& ~iszigzagging
         maxstepsize = maxstepsize*1.41;
-    elseif (alpha < 1 || iszigzagging) && nit > 1
-        maxstepsize = maxstepsize/1.41;
+        %mineigval = mineigval/1.4;
+    elseif alpha < 1 && nit > 1 %(alpha < 1 || iszigzagging) && nit > 1
+        maxstepsize = maxstepsize*alpha;
+        %mineigval = mineigval*1.4;
     end
+    max_maxstepsize = 5;
+    maxstepsize = min(maxstepsize, max_maxstepsize);
+%     min_mineigval = 1e-12;
+%     mineigval = max(mineigval, min_mineigval);
     % Allow increases in the merit function when at least one of the
     % objective or constraint values is not a good value
     if f0 < fgood && (isempty(g) || all(g < ggood))
@@ -575,6 +589,7 @@ while nit<=opts(15)
        'Infinite values were detected in the objective function. This indicates that the gradient calculation timed out when the objective calculation did not. Increase the integration timeout time period to avoid this error.')
    end
    [s,u,statusqp,steplimitactive]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,maxstepsize);
+   %[s,u,statusqp]=qp(H,fp,gp',-g,vlb-x(ilb),vub-x(iub),s,nec,-1,[]);
    delta=0;sHsfail=0;z0p1fail=0;augfail=0;if aug=='f',nAS=0;end;aug='f';
    SCV=sum(abs(g(1:nec)))+sum(max(0,g(nec+1:ncs)));
    %
@@ -586,7 +601,7 @@ while nit<=opts(15)
       if violated && ~UserHessian && s'*H*s<eps
          sHsfail=1;
       else
-         sigma=min(r,nit*sqrt(r));
+         sigma=min(r,max(nit-sigma_delay,1)*sqrt(r));
          r=min(rub,2*ncs*(u-v).^2/((s'*H*s)+(1-delta)));
          r=max(sigma,r);
       end
@@ -621,7 +636,9 @@ while nit<=opts(15)
       while delta>=deltaub && rho<=rhoub
          mod='t'; sHsfail=0;
          [sdelta,udelta,statusqp,steplimitactive]=qp([H zeros(ndv,1);zeros(1,ndv) rho],...
-            [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1,maxstepsize);
+            [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1,maxstepsize,ndv);
+%          [sdelta,udelta,statusqp]=qp([H zeros(ndv,1);zeros(1,ndv) rho],...
+%             [fp;0],[gp', -g],-g,slb,sub,[zeros(ndv,1);1],nec,-1);
          s=sdelta(1:ndv);
          if ~isempty(udelta); u = udelta(1:lenv); else u = zeros(lenv,1); end
          delta=sdelta(ndv+1);
@@ -643,6 +660,7 @@ while nit<=opts(15)
          aug='t'; nAS=nAS+1; sHsfail=0; delta=0;
          [z0,z0p1,z0p2,z0p3,z0best]=merit(v,r,nec,f,gv,fp,gpv,u,s);
          [s,u1,statusqp,steplimitactive]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1,maxstepsize);
+         %[s,u1,statusqp]=qp(H,z0p2,[],[],slb(ilb),sub(iub),s,nec,-1);
          u=v+z0p3; u([lb ub])=u1;
          if ~(strcmp(statusqp(1:2),'ok') || strcmp(statusqp(1:3),'max'))
             status=['Augmented Lagrangian QP problem is ' statusqp '.'];
@@ -657,7 +675,7 @@ while nit<=opts(15)
          end;
       end
       if aug=='f' && mod=='t'
-         sigma=min(r,nit*sqrt(r));
+         sigma=min(r,max(nit-sigma_delay,1)*sqrt(r));
          r=min(rub,2*ncs*(u-v).^2/((s'*H*s)+(1-delta)));
          r=max(sigma,r);
       end
@@ -677,6 +695,7 @@ while nit<=opts(15)
       end
    end
 %------------------------------------------------------------------
+
    % Display results and check termination criteria 
    %
    if scdv, ms=max(abs(s.*x1)); else, ms=max(abs(s)); end
@@ -909,6 +928,9 @@ while nit<=opts(15)
    elseif nit>opts(15)
       status='Maximum iterations exceeded. Increase opts(15).'; break
    end
+   % Update best observed merit function value once line search is complete
+   [~,~,~,~,z0best] = merit(v, r, nec, f, gv, fp, gpv, u, s);
+   
 %
    %------------------------------------------------------------------
    % Evaluate gradients using active set strategy
@@ -960,6 +982,9 @@ while nit<=opts(15)
       lambda.eqnonlin = v(1:nec);
       lambda.ineqnonlin = v(nec+1:ncs);
       H=feval(Opts.HessFun,xshape(x),lambda,varargin{:});
+%       [eigvec,eigval] = eig(H, 'vector');
+%       eigval(eigval < mineigval) = mineigval;
+%       H = eigvec*diag(eigval)*eigvec.';
       if any(isnan(H(:)))
         error('sqp:HessianNaNs', ...
             'NaNs detected in the Hessian. Likely an integration timed out for the gradient calculation. Try increasing the integration timeout time.')
@@ -1165,14 +1190,14 @@ function merit_fun=get_merit()
         end
         
         % Reevaluate the best merit function value observed so far for the
-        % current value of r
+        % current value of r, v, and u
         if nargout > 4
             bestNotAssigned = isempty(fbest);
             if bestNotAssigned
                 [vbest,fbest,gbest,fpbest,gpbest,ubest,sbest] = deal(v,f,-g,fp,-gp,u,s);
                 psi_best = psi;
             else
-                psi_best = merit_inner(vbest,r,nec,fbest,gbest,fpbest,gpbest,ubest,sbest);
+                psi_best = merit_inner(v,r,nec,fbest,gbest,fpbest,gpbest,u,sbest);
                 if psi < psi_best
                     % Store the current values if it is the best observed
                     [vbest,fbest,gbest,fpbest,gpbest,ubest,sbest] = deal(v,f,-g,fp,-gp,u,s);
