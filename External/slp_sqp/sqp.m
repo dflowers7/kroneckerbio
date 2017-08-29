@@ -570,7 +570,7 @@ while nit<=opts(15)
         maxstepsize = maxstepsize*1.41;
         %mineigval = mineigval/1.4;
     elseif alpha < 1 && nit > 1 %(alpha < 1 || iszigzagging) && nit > 1
-        maxstepsize = maxstepsize*alpha;
+        maxstepsize = maxstepsize/1.41;
         %mineigval = mineigval*1.4;
     end
     max_maxstepsize = 5;
