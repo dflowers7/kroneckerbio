@@ -189,6 +189,8 @@ obj.p = @p;
 obj.logp = @logp;
 obj.F = @F;
 
+obj.add = [];
+
 % Copy the objective structure
 obj = repmat(obj, dims);
 end

@@ -33,6 +33,9 @@ if calcJac
     D = zeros(100,nT);
 end
 
+% Need to collect fit parameters for all experiments for priors
+T_allcon = collectFitParameters(m, con, opts.UseParams, opts.UseSeeds, opts.UseInputControls, opts.UseDoseControls);
+
 if verbose; disp('Integrating forward...'); end
 count = 1;
 for i_con = 1:n_con
@@ -85,6 +88,7 @@ for i_con = 1:n_con
     [ints.UseSeeds] = deal(UseSeeds_i);
     [ints.UseInputControls] = deal(UseInputControls_i);
     [ints.UseDoseControls] = deal(UseDoseControls_i);
+    [ints.T] = deal(T_allcon);
     
     if calcJac
         [ints.nT] = deal(nT);

@@ -86,6 +86,8 @@ defaultOpts.TimeoutDuration = [];
 
 defaultOpts.ObjWeights     = ones(size(obj));
 
+defaultOpts.Integrator      = '';
+
 opts = mergestruct(defaultOpts, opts);
 
 % Constants

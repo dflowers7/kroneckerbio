@@ -1,4 +1,4 @@
-function opts = FixSimulationOpts(m, con, obs, opts, derorder)
+function [opts,nTstruct] = FixSimulationOpts(m, con, obs, opts, derorder)
 % opts = FixSimulationOpts(m, con, obs, opts, derorder)
 % Input arguments:
 %   derorder
@@ -53,6 +53,14 @@ opts = mergestruct(defaultOpts, opts);
 % Ensure UseControls is a cell vector of logical vectors
 [opts.UseInputControls, nTq] = fixUseControls(opts.UseInputControls, n_con, cat(1,con.nq));
 [opts.UseDoseControls, nTh] = fixUseControls(opts.UseDoseControls, n_con, cat(1,con.nh));
+
+nT = nTk + nTs + nTq + nTh;
+
+nTstruct.nT = nT;
+nTstruct.nTk = nTk;
+nTstruct.nTs = nTs;
+nTstruct.nTq = nTq;
+nTstruct.nTh = nTh;
 
 % Fix integration type
 [opts.continuous, opts.complex, opts.tGet] = fixIntegrationType(con, obs);

@@ -16,6 +16,7 @@ defaultOpts.Aeq              = [];
 defaultOpts.beq              = [];
 defaultOpts.TolOptim         = 1e-5;
 defaultOpts.TolX             = 0;
+defaultOpts.ConstraintTolerance = 1e-6;
 defaultOpts.Restart          = 0;
 defaultOpts.RestartJump      = 0.001;
 defaultOpts.TerminalObj      = -inf;
@@ -152,6 +153,7 @@ localOpts.TolFun                  = opts.TolOptim;
 localOpts.TolX                    = opts.TolX;
 localOpts.MaxFunEvals             = opts.MaxFunEvals;
 localOpts.MaxIter                 = opts.MaxIter;
+localOpts.ConstraintTolerance     = opts.ConstraintTolerance;
 
 switch opts.Solver
     case 'fmincon'
@@ -159,7 +161,7 @@ switch opts.Solver
         localOpts.Hessian                 = 'off'; % unused
         localOpts.RelLineSrchBnd          = opts.MaxStepSize;
         localOpts.RelLineSrchBndDuration  = Inf;
-        localOpts.TolCon                  = 1e-6;
+        localOpts.TolCon                  = opts.ConstraintTolerance;
         if isNonlinearConstraint
             localOpts.SpecifyConstraintGradient = true;
         end
