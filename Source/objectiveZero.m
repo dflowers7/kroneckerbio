@@ -187,6 +187,8 @@ obj.Gbest = 0;
 % Information theory
 obj.p = @p;
 obj.logp = @logp;
+obj.dlogpdT = @dlogpdT;
+obj.d2logpdT2_approx = @d2logpdT2_approx;
 obj.F = @F;
 
 obj.add = [];
@@ -322,6 +324,12 @@ val = 1;
 end
 function val = logp(int)
 val = 0;
+end
+function val = dlogpdT(int)
+val = zeros(int.nT,1);
+end
+function val = d2logpdT2_approx(int)
+val = zeros(int.nT);
 end
 function val = F(int)
 nT = int.nT;
