@@ -86,6 +86,11 @@ for i = 1:m
 end
 h = sqrt(h2);
 L = chol(V, 'lower');
+if isempty(r0)
+    % Choose a random value from the unbounded multivariate normal
+    % distribution as the starting value, if one isn't provided
+    r0 = mu + L*randn(size(mu));
+end
 Linv = inv(L);
 
 % Zero mean
