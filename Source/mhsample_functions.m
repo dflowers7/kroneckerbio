@@ -16,25 +16,28 @@ if nargin == 0
     m = 'test';
 end
 
+testing = ischar(m) && strcmp(m, 'test');
+
 nmemo = 5;
 [ints,Ts] = deal(cell(nmemo,1));
 
 % Fix the opts struct
-[m,con,obj,opts] = FixFitObjectiveOpts(m, con, obj, opts);
-
-% Fix extra options
-field_defaults = {
-    'MinimumEigenvalueThreshold'    1
-    };
-for ii = 1:size(field_defaults,1)
-    if ~isfield(opts, field_defaults{ii,1})
-        opts.(field_defaults{ii,1}) = [];
-    end
-    if isempty(opts.(field_defaults{ii,1}))
-        opts.(field_defaults{ii,1}) = field_defaults{ii,2};
+if ~testing
+    [m,con,obj,opts] = FixFitObjectiveOpts(m, con, obj, opts);
+    
+    % Fix extra options
+    field_defaults = {
+        'MinimumEigenvalueThreshold'    1
+        };
+    for ii = 1:size(field_defaults,1)
+        if ~isfield(opts, field_defaults{ii,1})
+            opts.(field_defaults{ii,1}) = [];
+        end
+        if isempty(opts.(field_defaults{ii,1}))
+            opts.(field_defaults{ii,1}) = field_defaults{ii,2};
+        end
     end
 end
-
 
 % Set the function to be used to calculate the log PDF and its
 % sensitivities
@@ -44,7 +47,6 @@ logpdf_fun = @logpdf;
 logproppdf_fun = @proplogpdf;
 proprnd_fun = @proprnd;
 
-testing = ischar(m) && strcmp(m, 'test');
 if testing
     % Define a multinormal distribution to test the sampler on
     nvar = 3;
@@ -74,7 +76,7 @@ if testing
     
     % Compare functions against rejection sampling, which works okay for the test
     % problem
-    nsamps = 100000;
+    nsamps = 10000;
     reject_samps = bsxfun(@plus, (chol(V,'lower')*randn(nvar, nsamps)).', mu(:).');
     viol_lb = any(bsxfun(@lt, reject_samps, opts.LowerBound(:).'), 2);
     viol_ub = any(bsxfun(@gt, reject_samps, opts.UpperBound(:).'), 2);
@@ -99,7 +101,8 @@ if testing
     proprnd_mu_err = abs(proprnd_mu - reject_mu)./reject_bs_stderrs;
     assert(max(proprnd_mu_err) < 3, 'proprnd test failure!')
     
-    mh_samples = mhsample(zeros(1,nvar), nsamps, 'logpdf', logpdf_fun, 'logproppdf', logproppdf_fun, 'proprnd', proprnd_fun);
+%     mh_samples = mhsample(zeros(1,nvar), nsamps, 'logpdf', logpdf_fun, 'logproppdf', logproppdf_fun, 'proprnd', proprnd_fun);
+    mh_samples = mhsample2(zeros(1,nvar), nsamps, logpdf_fun, logproppdf_fun, proprnd_fun);
     mh_samples_mu = mean(mh_samples, 1);
     mh_samples_err = abs(mh_samples_mu - reject_mu)./reject_bs_stderrs;
     assert(max(mh_samples_err) < 3, 'mhsample test failure!')
@@ -195,7 +198,11 @@ end
         
         % If there isn't one, perform a new integration
         [mT, conT] = update(T);
-        sim = SimulateSensitivity(mT, conT, obj, opts);
+        if opts.ParallelizeExperiments
+            sim = ParallelizeExperiments(@SimulateSensitivity, mT, conT, obj, opts);
+        else
+            sim = SimulateSensitivity(mT, conT, obj, opts);
+        end
         int = reshape([sim.int], size(obj));
         
         % Store the new integration, tossing the oldest one
