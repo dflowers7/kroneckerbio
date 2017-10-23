@@ -33,14 +33,16 @@ if ~initialized
     
     % Fix options (may need to do this better later)
     switch func2str(fun)
-        case 'SimulateSystem'
+        case {'SimulateSystem', 'ObjectiveValue'}
             derorder = 0;
-        case 'SimulateSensitivity'
+        case {'SimulateSensitivity', 'ObjectiveGradient', 'ObjectiveInformation'}
             derorder = 1;
-        case 'SimulateCurvature'
+        case {'SimulateCurvature', 'ObjectiveHessian'}
             derorder = 2;
         otherwise
-            derorder = 0;
+            error(['The sensitivity order needed for function %s is not ' ...
+                'listed in ParallelizeExperiments. Add the function to ' ...
+                'the appropriate switch.'], func2str(fun))
     end
     opts = FixSimulationOpts(m, con, obs, opts, derorder);
     
@@ -105,9 +107,26 @@ for i = 1:NumWorkers
         temp{i,j} = varargout_i{j};
     end
 end
+
+switch func2str(fun)
+    case {'SimulateSystem', 'SimulateSensitivity', 'SimulateCurvature'}
+        catfun = @horzcat;
+    case {'ObjectiveValue', 'ObjectiveGradient', 'ObjectiveInformation', 'ObjectiveHessian'}
+        catfun = @sumentries;
+        % TODO: handle different experiments having different fit
+        % parameters. This will be incorrect if there are experiment-specific fit
+        % parameters.
+end
+
+    function X = sumentries(varargin)
+        X = cat(3,varargin{:});
+        X = sum(X, 3);
+    end
+
+% Concatenate each set of experiments' results
 varargout = cell(nargo,1);
 for i = 1:nargo
-    varargout{i} = [temp{:,i}];
+    varargout{i} = catfun(temp{:,i});
 end
 % fprintf('Assembling outputs took %0.3g seconds.\n', toc(qq))
 
