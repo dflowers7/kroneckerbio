@@ -29,7 +29,9 @@ if ~initialized
     ncon_per_worker = repmat(ncon_per_worker, NumWorkers, 1);
     nleft = n_con - sum(ncon_per_worker);
     ncon_per_worker(1:nleft) = ncon_per_worker(1:nleft)+1;
-    icon_per_worker = mat2cell((1:n_con)', ncon_per_worker, 1);
+    % Randomly assign experiments so that groups of experiments that are
+    % more expensive to evaluate aren't all given to the same worker
+    icon_per_worker = mat2cell(randperm(n_con)', ncon_per_worker, 1);
     
     % Fix options (may need to do this better later)
     switch func2str(fun)
@@ -110,13 +112,18 @@ end
 
 switch func2str(fun)
     case {'SimulateSystem', 'SimulateSensitivity', 'SimulateCurvature'}
-        catfun = @horzcat;
+        catfun = @horzcat_reorder;
     case {'ObjectiveValue', 'ObjectiveGradient', 'ObjectiveInformation', 'ObjectiveHessian'}
         catfun = @sumentries;
         % TODO: handle different experiments having different fit
         % parameters. This will be incorrect if there are experiment-specific fit
         % parameters.
 end
+
+    function X = horzcat_reorder(varargin)
+        X = [varargin{:}];
+        X(:,vertcat(icon_per_worker{:})) = X;
+    end
 
     function X = sumentries(varargin)
         X = cat(3,varargin{:});

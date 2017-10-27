@@ -1,4 +1,4 @@
-function xsamps = mhsample2(x0, nsamps, logpdf, logproppdf, proprnd, options)
+function [xsamps, stats] = mhsample2(x0, nsamps, logpdf, logproppdf, proprnd, options)
 % Input arguments
 %   x0
 %       Row vector indicating the starting position.
@@ -102,6 +102,7 @@ nsamps_new = burnin + nsamps*thin;
 
 nx = numel(x0);
 xsamps = nan(nsamps_new, nx);
+logdists = nan(nsamps_new, 1);
 x = x0;
 
 athresh = log(rand(nsamps_new,1));
@@ -119,20 +120,23 @@ for i = 1:nsamps_new
     
     if accept
         xsamps(i,:) = y;
+        logdists(i) = norm(log10(y./x));
         x = y;
         naccepts = naccepts + 1;
     else
         xsamps(i,:) = x;
+        logdists(i) = 0;
     end
     
     if verbose > 0
         if mod(i,25) == 1
             fprintf('\n')
-            fprintf('%10s%10s%15s%12s%12s%15s%15s%10s%20s\n', 'Iter', 'Accepted', 'Accept rate', 'logp(x)', 'logp(y)', 'logproppdf(x)', 'logproppdf(y)', '|x-x0|', '|log10(x./x0)|')
-            fprintf([repmat('-', 1, 119) '\n'])
+            fprintf('%10s%10s%15s%12s%12s%15s%15s%10s%20s%20s\n', 'Iter', 'Accepted', 'Accept rate', 'logp(x)', 'logp(y)', 'logproppdf(x)', 'logproppdf(y)', '|x-x0|', '|log10(x./x0)|', 'Avg iter log dist')
+            fprintf([repmat('-', 1, 139) '\n'])
         end
-        fprintf('%10d%10.0g%15.2g%12.3g%12.3g%15.3g%15.3g%10.3g%20.3g\n', i, accept, ...
-            naccepts/i, lx, ly, lpx, lpy, norm(x-x0), norm(log10(x)-log10(x0)));
+        fprintf('%10d%10.0g%15.2g%12.3g%12.3g%15.3g%15.3g%10.3g%20.3g%20.3g\n', i, accept, ...
+            naccepts/i, lx, ly, lpx, lpy, norm(x-x0), norm(log10(x)-log10(x0)), ...
+            mean(logdists(1:i)));
     end
     
 end
@@ -142,6 +146,10 @@ xsamps(1:burnin,:) = [];
 
 % Thin samples
 xsamps = xsamps(thin:thin:end, :);
+
+% Set stats
+stats.meanlogdists = mean(logdists);
+stats.acceptrate = naccepts/nsamps_new;
 
 if testing
     if nvars == 1

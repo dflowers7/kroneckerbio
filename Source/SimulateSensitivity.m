@@ -101,10 +101,28 @@ assert(isscalar(m), 'KroneckerBio:SimulateSensitivity:MoreThanOneModel', 'The mo
 
 % Default options
 derorder = 1;
-opts = FixSimulationOpts(m, con, obs, opts, derorder);
+[opts,nTstruct] = FixSimulationOpts(m, con, obs, opts, derorder);
 
 verbose = logical(opts.Verbose);
 opts.Verbose = max(opts.Verbose-1,0);
+
+% Determine which parameters are fit by which experiments
+T_experiment = zeros(nTstruct.nT, 1);
+T_experiment(1:nTstruct.nTk) = 0;
+nTs_con = sum(opts.UseSeeds,1);
+nTq_con = cellfun(@sum, opts.UseInputControls(:)');
+nTh_con = cellfun(@sum, opts.UseDoseControls(:)');
+nT_con = {nTs_con, nTq_con, nTh_con};
+endi = nTstruct.nTk;
+for i_type = 1:3
+    for j_con = 1:n_con
+        starti = endi + 1;
+        endi = endi + nT_con{i_type}(j_con);
+        T_experiment(starti:endi) = j_con;
+    end
+end
+% Determine which T's are fit by which experiments
+TisExperiment = bsxfun(@(T_experiment,i_con)T_experiment == 0 | T_experiment == i_con, T_experiment, 1:n_con);
 
 %% Run integration for each experiment
 sim = emptystruct([n_obs,n_con]);
@@ -121,6 +139,7 @@ for i_con = 1:n_con
     % Integrate [x; dx/dT] over time
     if verbose; fprintf(['Integrating sensitivities for ' con(i_con).Name '...']); end
     ints = integrateAllSens(m, con(i_con), obs(:,i_con), opts_i);
+    [ints.TisExperiment] = deal(TisExperiment(:,i_con));
     if verbose; fprintf('done.\n'); end
     
     for i_obs = 1:n_obs

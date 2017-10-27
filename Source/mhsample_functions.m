@@ -5,6 +5,9 @@ function [logpdf_fun, logproppdf_fun, proprnd_fun, testing_info] = mhsample_func
 %   obj
 %   opts
 %       .MinimumEigenvalueThreshold
+%       .MaximumConditionNumberThreshold
+%       .LeastSquaresSingularValueThreshold
+%       .LeastSquaresConditionNumberThreshold
 % Output arguments
 %   logpdf_fun
 %   proplogpdf_fun
@@ -27,8 +30,13 @@ if ~testing
     
     % Fix extra options
     field_defaults = {
-        'MinimumEigenvalueThreshold'    1
+        'MinimumEigenvalueThreshold'            1
+        'MaximumConditionNumberThreshold'       Inf
+        'RegularizeLeastSquares'                false
+        'LeastSquaresSingularValueThreshold'    1
+        'LeastSquaresConditionNumberThreshold'  Inf
         };
+    
     for ii = 1:size(field_defaults,1)
         if ~isfield(opts, field_defaults{ii,1})
             opts.(field_defaults{ii,1}) = [];
@@ -41,7 +49,11 @@ end
 
 % Set the function to be used to calculate the log PDF and its
 % sensitivities
-logpdf_sens_fun = @logpdf_sens;
+if opts.RegularizeLeastSquares
+    logpdf_sens_fun = @logpdf_sens_regularizedleastsquares;
+else
+    logpdf_sens_fun = @logpdf_sens;
+end
 
 logpdf_fun = @logpdf;
 logproppdf_fun = @proplogpdf;
@@ -159,7 +171,8 @@ end
         end
         
         % The proposal distribution is a Gaussian truncated by the bounds,
-        % with mean mu = T0 + dT_mu, where
+        % with mean mu = T0 + dT_mu, where (using the fact that the
+        % likelihood derivative should be zero at the mean)
         %   dp0dT = -d2p0dT2*dT_mu --> dT_mu = -d2p0dT2 \ dp0dT
         ldT_mu = -d2p0dT2_approx \ dp0dT;
         lmu = lT0 + ldT_mu;
@@ -212,6 +225,56 @@ end
 
     function [p, dpdT, d2pdT2] = logpdf_sens(T)
         int = simulate(T);
+        
+        out = cell(max(nargout,1),1);
+        [out{:}] = objredfun_logp(obj, int);
+        p = out{1};
+        if nargout > 1
+            dpdT = out{2};
+            if nargout > 2
+                d2pdT2 = out{3};
+                % Threshold eigenvalues at a minimum value
+                d2pdT2 = threshold_fun_eig(d2pdT2, ...
+                    opts.MinimumEigenvalueThreshold, ...
+                    opts.MaximumConditionNumberThreshold);
+            end
+        end
+    end
+
+    function [p, dpdT, d2pdT2] = logpdf_sens_regularizedleastsquares(T)
+        % Note this neglects any dependence of the sd values on the output
+        % values!
+        
+        int = simulate(T);
+        
+        islsq = strcmp({obj.Type}', 'Objective.Data.WeightedSumOfSquares');
+        
+        [out,out_lsq] = deal(cell(max(nargout,1),1));
+        if ~any(~islsq)
+            [out{:}] = deal(0);
+        else
+            [out{:}] = objredfun_logp(obj(~islsq), int(~islsq));
+        end
+        if ~any(islsq)
+            [out{:}] = deal(0);
+        else
+            [out_lsq{:}] = objredfun_regularizedlsq_logp(obj(islsq), int(islsq));
+        end
+        
+        p = out{1} + out_lsq{1};
+        if nargout > 1
+            dpdT = out{2} + out_lsq{2};
+            if nargout > 2
+                d2pdT2 = out{3} + out_lsq{3};
+                d2pdT2 = threshold_fun_eig(d2pdT2, ...
+                    opts.MinimumEigenvalueThreshold, ...
+                    opts.MaximumConditionNumberThreshold);
+            end
+        end
+        
+    end
+
+    function [p,dpdT,d2pdT2] = objredfun_logp(obj,int)
         order = nargout - 1;
         
         [p,dpdT,d2pdT2] = deal([]);
@@ -243,14 +306,74 @@ end
                 
             end
         end
+    end
+    
+    function [p,dpdT,d2pdT2] = objredfun_regularizedlsq_logp(obj,int)
         
-        if order > 1
-            % Threshold eigenvalues at a minimum value
-            [S,d] = eig(-d2pdT2, 'vector'); % Curvature will be negative. Flip to positive
-            eigthresh = opts.MinimumEigenvalueThreshold;
-            d(d < eigthresh) = eigthresh;
-            d2pdT2 = -S*diag(d)*S.'; % Flip back to negative curvature
+        % Initialize variables
+        p = 0;
+        if nargout > 1
+            err = cell(numel(obj),1);
+            derrdT = cell(numel(obj),1);
+            nT = numel(int(1).TisExperiment);
         end
+        
+        for i = 1:numel(obj)
+            obji = obj(i);
+            inti = int(i);
+            
+            p = p + obji.logp(inti);
+            
+            if nargout > 1
+                err_i = obji.err(inti);
+                err{i} = err_i;
+            
+                derrdT_i = obji.derrdT(inti);
+                nerr = numel(err_i);
+                derrdT{i} = zeros(nerr, nT);
+                derrdT{i}(:,inti.TisExperiment) = derrdT_i;
+            end
+        end
+        
+        if nargout > 1
+            err = vertcat(err{:});
+            derrdT = vertcat(derrdT{:});
+            derrdT = threshold_fun(derrdT, ...
+                opts.LeastSquaresSingularValueThreshold, ...
+                opts.LeastSquaresConditionNumberThreshold);
+            
+            dpdT = -derrdT.'*err;
+            d2pdT2 = -derrdT.'*derrdT;
+        end
+    end
+
+    function X = threshold_fun(X, singvalthresh, condthresh)
+        [u,d,v] = svd(X, 'econ');
+        d = diag(d);
+        
+        d(d < singvalthresh) = singvalthresh;
+        
+        condnos = max(d)./d;
+        condnos(condnos > condthresh) = condthresh;
+        d = max(d)./condnos;
+        
+        X = u*diag(d)*v.';
+    end
+
+    function X = threshold_fun_eig(X, eigthresh, condthresh)
+        X = -X;
+        X = (X + X.')/2;
+        [S,d] = eig(X, 'vector');
+        
+        d(d < eigthresh) = eigthresh;
+        
+        condnos = max(d)./d;
+        condnos(condnos > condthresh) = condthresh;
+        d = max(d)./condnos;
+        
+        X = S*diag(d)*S.';
+        X = (X + X.')/2;
+        X = -X;
     end
 
 %% Test functions
