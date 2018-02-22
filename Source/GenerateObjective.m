@@ -311,6 +311,7 @@ updateoptsfun = @updateOpts;
         
         if timeIntegration
             tottimer = tic;
+            inttime_workers = [];
         end
         
         nIntegrates = sum(~cellfun(@isempty,integrateFunctions));
@@ -562,8 +563,10 @@ updateoptsfun = @updateOpts;
         if timeIntegration
             tottime = toc(tottimer);
             inttime = 0;
-            for i = 1:NumWorkers
-                inttime = inttime + inttime_workers{i};
+            if ~isempty(inttime_workers)
+                for i = 1:NumWorkers
+                    inttime = inttime + inttime_workers{i};
+                end
             end
             fprintf('Integration functions took %g percent of the total time\n', inttime./tottime*100)
         end
