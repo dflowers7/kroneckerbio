@@ -103,16 +103,25 @@ end
         function [value, isTerminal, direction] = events(t, joint)
             u = uf(t);
             x = joint(1:nx); % x_
+            njoint = numel(joint);
+            dxdT = reshape(joint(nx+1:end), nx, nT);
 
             % Absolute change
-            absDiff = con.private.TimeScale * f(-1,x,u); % Change over an entire simulation
+            absDiff = [
+                con.private.TimeScale * f(-1,x,u)
+                % Note the below expression neglects the time derivative of
+                % the input, which currently isn't calculated by any
+                % function of KroneckerBio! This only matters if any of the
+                % u's have a nonzero time derivative
+                con.private.TimeScale * vec(dfdx(-1,x,u)*dxdT + dfdT(-1,x,u))
+                ]; % Change over an entire simulation
             
             % Relative change
-            relDiff = absDiff ./ x;
+            relDiff = absDiff ./ joint;
             
             % Either absolute change or relative change must be less than
             % the tolerance for all species
-            value = max(min(abs(absDiff) - opts.AbsTol(1:nx), abs(relDiff) - opts.RelTol));
+            value = max(min(abs(absDiff) - opts.AbsTol(1:njoint), abs(relDiff) - opts.RelTol));
             if value < 0
                 value = 0;
             end

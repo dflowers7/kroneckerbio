@@ -27,13 +27,19 @@ N = numel(discontinuities);
 % Performance constants
 forward_boost = 4;   % Number of epsilons to jump at a discontinuity
 
+% Fix output and event functions with timeout, if provided
+outputfun = []; % Currently outputfun is not used by Kronecker separately from the timeout function
+if ~isempty(timeoutdurationinsec)
+    [outputfun, events] = timeoutOutputFunction(timeoutdurationinsec, outputfun, events);
+end
+
 % ODE options
 sim_opts = odeset('Jacobian', jac, 'AbsTol', AbsTol, 'RelTol', RelTol, 'NonNegative', nonnegative);
 if ~isempty(events)
     sim_opts.Events = events;
 end
-if ~isempty(timeoutdurationinsec)
-    sim_opts.OutputFcn = timeoutOutputFunction(timeoutdurationinsec);
+if ~isempty(outputfun)
+    sim_opts.OutputFcn = outputfun;
 end
 
 %% Initialize variables
